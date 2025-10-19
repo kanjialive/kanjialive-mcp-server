@@ -21,8 +21,11 @@ import json
 import logging
 import datetime
 import re
+import sys
+import unicodedata
 from enum import Enum
 from typing import Optional, List, Dict, Any, Tuple
+from urllib.parse import quote
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -36,22 +39,94 @@ REQUEST_TIMEOUT = 30.0
 # IMPORTANT: Set your RapidAPI key via environment variable or replace the default value
 # Get your free API key at: https://rapidapi.com/KanjiAlive/api/learn-to-read-and-write-japanese-kanji
 import os
-RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "YOUR_RAPIDAPI_KEY_HERE")
 RAPIDAPI_HOST = "kanjialive-api.p.rapidapi.com"
-
-# API Headers for RapidAPI authentication
 USER_AGENT = "kanjialive-mcp/1.0 (+https://github.com/kanjialive-mcp-server)"
-API_HEADERS = {
-    "X-RapidAPI-Key": RAPIDAPI_KEY,
-    "X-RapidAPI-Host": RAPIDAPI_HOST,
-    "User-Agent": USER_AGENT
-}
 
 # Logger (configured in main)
 logger = logging.getLogger(__name__)
 
 # Initialize FastMCP server
 mcp = FastMCP("kanjialive_mcp")
+
+# Global HTTP client for connection pooling
+_async_client: Optional[httpx.AsyncClient] = None
+_client_lock = asyncio.Lock()
+
+def _get_api_headers() -> Dict[str, str]:
+    """
+    Get API headers with runtime key validation.
+
+    Returns:
+        Dict of HTTP headers for RapidAPI requests
+
+    Raises:
+        ValueError: If RAPIDAPI_KEY is not configured
+    """
+    key = os.getenv("RAPIDAPI_KEY")
+    if not key or key == "YOUR_RAPIDAPI_KEY_HERE":
+        raise ValueError(
+            "RAPIDAPI_KEY environment variable must be set. "
+            "Get your free API key at: "
+            "https://rapidapi.com/KanjiAlive/api/learn-to-read-and-write-japanese-kanji"
+        )
+
+    return {
+        "X-RapidAPI-Key": key,
+        "X-RapidAPI-Host": RAPIDAPI_HOST,
+        "Accept": "application/json",
+        "User-Agent": USER_AGENT
+    }
+
+async def get_client() -> httpx.AsyncClient:
+    """
+    Get or create the shared AsyncClient instance.
+
+    Uses connection pooling for improved performance across multiple requests.
+
+    Returns:
+        Shared httpx.AsyncClient instance
+    """
+    global _async_client
+
+    if _async_client is None:
+        async with _client_lock:
+            # Double-check after acquiring lock
+            if _async_client is None:
+                headers = _get_api_headers()
+                _async_client = httpx.AsyncClient(
+                    timeout=REQUEST_TIMEOUT,
+                    headers=headers
+                )
+                logger.debug("Created new shared HTTP client")
+
+    return _async_client
+
+async def _cleanup_client() -> None:
+    """Close the shared HTTP client if it exists."""
+    global _async_client
+
+    if _async_client is not None:
+        await _async_client.aclose()
+        _async_client = None
+        logger.debug("Closed shared HTTP client")
+
+def _normalize_japanese_text(text: str) -> str:
+    """
+    Normalize Japanese text to NFKC form.
+
+    This ensures consistent representation of characters that can be
+    encoded in multiple ways (e.g., half-width vs full-width katakana,
+    composed vs decomposed characters).
+
+    Args:
+        text: Japanese text to normalize
+
+    Returns:
+        Normalized text in NFKC form
+    """
+    if not isinstance(text, str):
+        return str(text)
+    return unicodedata.normalize('NFKC', text)
 
 # Markdown escaping
 _MD_SPECIAL = re.compile(r'([\\`*_{}[\]()#+\-.!|>])')
@@ -129,6 +204,12 @@ class KanjiBasicSearchInput(BaseModel):
         description="Output format: 'markdown' for human-readable or 'json' for structured data"
     )
 
+    @field_validator('query')
+    @classmethod
+    def normalize_query(cls, v: str) -> str:
+        """Normalize Unicode in query string."""
+        return _normalize_japanese_text(v.strip())
+
 
 class KanjiAdvancedSearchInput(BaseModel):
     """Input model for advanced kanji search with multiple filter parameters."""
@@ -198,7 +279,8 @@ class KanjiAdvancedSearchInput(BaseModel):
         if v is None:
             return v
 
-        v = v.strip()
+        # Normalize Unicode before validation
+        v = _normalize_japanese_text(v.strip())
 
         # Pattern for pure katakana (including middle dot, iteration marks)
         katakana_pattern = r'^[\u30A0-\u30FF\u30FB-\u30FE・]+$'
@@ -225,7 +307,8 @@ class KanjiAdvancedSearchInput(BaseModel):
         if v is None:
             return v
 
-        v = v.strip()
+        # Normalize Unicode before validation
+        v = _normalize_japanese_text(v.strip())
 
         # Pattern for pure hiragana (including iteration marks, small kana, dots for okurigana)
         hiragana_pattern = r'^[\u3040-\u309F\u3099-\u309C.・]+$'
@@ -297,6 +380,12 @@ class KanjiDetailInput(BaseModel):
         description="Output format: 'markdown' for human-readable or 'json' for structured data"
     )
 
+    @field_validator('character')
+    @classmethod
+    def normalize_character(cls, v: str) -> str:
+        """Normalize Unicode in character."""
+        return _normalize_japanese_text(v.strip())
+
 
 class SearchResultMetadata(BaseModel):
     """Metadata about search results."""
@@ -329,6 +418,7 @@ async def _make_api_request(
     Make an API request to Kanji Alive via RapidAPI.
 
     This function returns BOTH the API response AND metadata about the request.
+    Uses a shared HTTP client for connection pooling.
 
     Args:
         endpoint: API endpoint path
@@ -349,56 +439,164 @@ async def _make_api_request(
     max_retries = 3
     backoff = 0.5  # Initial backoff in seconds
 
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT, headers=API_HEADERS) as client:
-        last_exception = None
+    client = await get_client()
+    last_exception = None
 
-        for attempt in range(1, max_retries + 1):
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+
+            response_data = response.json()
+
+            # Validate response structure
             try:
-                response = await client.get(url, params=params)
-                response.raise_for_status()
-
-                # Track request metadata
-                request_info = {
-                    "endpoint": endpoint,
-                    "params": params or {},
-                    "timestamp": datetime.datetime.now().isoformat()
-                }
-
-                return response.json(), request_info
-
-            except httpx.HTTPStatusError as e:
-                status = e.response.status_code
-                # Retry on rate limiting (429) and server errors (5xx)
-                if status == 429 or 500 <= status < 600:
-                    last_exception = e
-                    if attempt < max_retries:
-                        logger.warning(
-                            f"Request failed with status {status}, "
-                            f"retrying in {backoff}s (attempt {attempt}/{max_retries})"
-                        )
-                        await asyncio.sleep(backoff)
-                        backoff *= 2  # Exponential backoff
-                        continue
-                # For other HTTP errors, don't retry
+                _validate_search_response(response_data, endpoint)
+            except ValueError as ve:
+                logger.error(f"Response validation failed: {ve}")
                 raise
 
-            except (httpx.ConnectError, httpx.ReadTimeout) as e:
+            # Track request metadata
+            request_info = {
+                "endpoint": endpoint,
+                "params": params or {},
+                "timestamp": datetime.datetime.now().isoformat()
+            }
+
+            return response_data, request_info
+
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code
+            # Retry on rate limiting (429) and server errors (5xx)
+            if status == 429 or 500 <= status < 600:
                 last_exception = e
                 if attempt < max_retries:
-                    logger.warning(
-                        f"Network error: {type(e).__name__}, "
-                        f"retrying in {backoff}s (attempt {attempt}/{max_retries})"
-                    )
-                    await asyncio.sleep(backoff)
-                    backoff *= 2  # Exponential backoff
-                    continue
-                # If this was the last attempt, raise
-                raise
+                    # Honor Retry-After header for rate limiting
+                    if status == 429:
+                        retry_after = e.response.headers.get("Retry-After")
+                        if retry_after and retry_after.isdigit():
+                            delay = float(retry_after)
+                            logger.warning(
+                                f"Rate limited (429). Retry-After header: {retry_after}s. "
+                                f"Waiting {delay}s before retry (attempt {attempt}/{max_retries})"
+                            )
+                        else:
+                            delay = backoff
+                            logger.warning(
+                                f"Rate limited (429), no Retry-After header. "
+                                f"Using exponential backoff: {delay}s (attempt {attempt}/{max_retries})"
+                            )
+                    else:
+                        delay = backoff
+                        logger.warning(
+                            f"Server error {status}, "
+                            f"retrying in {delay}s (attempt {attempt}/{max_retries})"
+                        )
 
-        # If we exhausted all retries, raise the last exception
-        if last_exception:
-            raise last_exception
-        raise httpx.HTTPError("Request failed after retries")
+                    await asyncio.sleep(delay)
+                    backoff = max(backoff * 2, delay)  # Ensure backoff increases
+                    continue
+            # For other HTTP errors, don't retry
+            raise
+
+        except (httpx.RequestError, httpx.TimeoutException) as e:
+            last_exception = e
+            if attempt < max_retries:
+                logger.warning(
+                    f"Network error: {type(e).__name__}, "
+                    f"retrying in {backoff}s (attempt {attempt}/{max_retries})"
+                )
+                await asyncio.sleep(backoff)
+                backoff *= 2  # Exponential backoff
+                continue
+            # If this was the last attempt, raise
+            raise
+
+    # If we exhausted all retries, raise the last exception
+    if last_exception:
+        raise last_exception
+    raise httpx.HTTPError("Request failed after retries")
+
+
+def _validate_search_response(data: Any, endpoint: str) -> None:
+    """
+    Validate API response structure for search endpoints.
+
+    Args:
+        data: Response data from API
+        endpoint: The endpoint that was called
+
+    Raises:
+        ValueError: If response structure is invalid
+    """
+    if endpoint.startswith("search"):
+        if not isinstance(data, list):
+            logger.error(
+                f"Invalid search response type: expected list, got {type(data).__name__}",
+                extra={"endpoint": endpoint, "response_type": type(data).__name__}
+            )
+            raise ValueError(
+                f"API returned unexpected format for search. "
+                f"Expected list of results, got {type(data).__name__}"
+            )
+
+        # Validate each result has required fields
+        for idx, item in enumerate(data):
+            if not isinstance(item, dict):
+                raise ValueError(
+                    f"Search result {idx} is not a dictionary (got {type(item).__name__})"
+                )
+            if 'kanji' not in item:
+                logger.warning(
+                    f"Search result {idx} missing 'kanji' field",
+                    extra={"result_keys": list(item.keys())}
+                )
+
+    elif endpoint.startswith("kanji"):
+        if not isinstance(data, dict):
+            logger.error(
+                f"Invalid kanji detail response type: expected dict, got {type(data).__name__}",
+                extra={"endpoint": endpoint, "response_type": type(data).__name__}
+            )
+            raise ValueError(
+                f"API returned unexpected format for kanji details. "
+                f"Expected dictionary, got {type(data).__name__}"
+            )
+
+        # Check for required top-level fields
+        required_fields = ['kanji']
+        missing = [f for f in required_fields if f not in data]
+        if missing:
+            logger.warning(
+                f"Kanji detail response missing fields: {missing}",
+                extra={"available_fields": list(data.keys())}
+            )
+
+
+def _validate_response_not_empty(data: Any, query_info: str) -> None:
+    """
+    Validate that response data is not empty.
+
+    Args:
+        data: Response data from API
+        query_info: Description of the query for error messages
+
+    Raises:
+        ValueError: If response is empty when it shouldn't be
+    """
+    if isinstance(data, list) and len(data) == 0:
+        logger.info(f"Empty result set for query: {query_info}")
+        # Don't raise - empty results are valid for searches
+    elif isinstance(data, dict) and not data:
+        raise ValueError(
+            f"API returned empty response for {query_info}. "
+            f"The kanji may not exist in the database."
+        )
+    elif data is None:
+        raise ValueError(
+            f"API returned null response for {query_info}. "
+            f"This may indicate a server error."
+        )
 
 
 def _handle_api_error(e: Exception) -> str:
@@ -430,9 +628,24 @@ def _handle_api_error(e: Exception) -> str:
         return f"Error: API request failed with status {e.response.status_code}: {e.response.text}"
     elif isinstance(e, httpx.TimeoutException):
         return "Error: Request timed out. The Kanji Alive API may be experiencing issues. Please try again."
-    elif isinstance(e, httpx.NetworkError):
+    elif isinstance(e, httpx.RequestError):
         return "Error: Network error. Please check your internet connection."
-    return f"Error: Unexpected error occurred: {type(e).__name__} - {str(e)}"
+
+    # Log full details for debugging
+    logger.error(
+        f"Unexpected error in API request: {type(e).__name__}",
+        exc_info=True,
+        extra={
+            "error_type": type(e).__name__,
+            "error_message": str(e)
+        }
+    )
+
+    # Return sanitized message to user
+    return (
+        "Error: An unexpected error occurred while processing your request. "
+        "Please try again. If the problem persists, check the server logs for details."
+    )
 
 
 def _format_search_results_markdown(
@@ -469,7 +682,7 @@ def _format_search_results_markdown(
     
     # Main results table
     output += "| Kanji | Meaning | Strokes | Grade | Radical | Radical Strokes |\n"
-    output += "|-------|---------|---------|-------|---------|-----------------|​\n"
+    output += "|-------|---------|---------|-------|---------|------------------|\n"
     
     for kanji in results:
         char = kanji.get('kanji', {}).get('character', '?')
@@ -682,7 +895,11 @@ async def kanjialive_search_basic(params: KanjiBasicSearchInput) -> str:
     """
     try:
         logger.info(f"Basic search: {params.query}")
-        results, request_info = await _make_api_request(f"search/{params.query}")
+        encoded_query = quote(params.query, safe='')
+        results, request_info = await _make_api_request(f"search/{encoded_query}")
+
+        # Validate not empty for non-search terms
+        _validate_response_not_empty(results, f"query '{params.query}'")
 
         # Ensure results is a list
         if not isinstance(results, list):
@@ -706,7 +923,14 @@ async def kanjialive_search_basic(params: KanjiBasicSearchInput) -> str:
             return _format_search_results_markdown(results, metadata)
 
     except Exception as e:
-        logger.error(f"Basic search error: {e}")
+        logger.error(
+            f"Tool execution error: {type(e).__name__}",
+            exc_info=True,
+            extra={
+                "tool": "kanjialive_search_basic",
+                "params": params.model_dump()
+            }
+        )
         return _handle_api_error(e)
 
 
@@ -811,7 +1035,14 @@ async def kanjialive_search_advanced(params: KanjiAdvancedSearchInput) -> str:
             return _format_search_results_markdown(results, metadata)
 
     except Exception as e:
-        logger.error(f"Advanced search error: {e}")
+        logger.error(
+            f"Tool execution error: {type(e).__name__}",
+            exc_info=True,
+            extra={
+                "tool": "kanjialive_search_advanced",
+                "params": params.model_dump()
+            }
+        )
         return _handle_api_error(e)
 
 
@@ -862,6 +1093,9 @@ async def kanjialive_get_kanji_details(params: KanjiDetailInput) -> str:
         logger.info(f"Get kanji details: {params.character}")
         kanji_data, request_info = await _make_api_request(f"kanji/{params.character}")
 
+        # Validate not empty
+        _validate_response_not_empty(kanji_data, f"kanji '{params.character}'")
+
         if params.response_format == ResponseFormat.JSON:
             # Harmonize with search output structure
             return json.dumps({
@@ -875,7 +1109,14 @@ async def kanjialive_get_kanji_details(params: KanjiDetailInput) -> str:
             return _format_kanji_detail_markdown(kanji_data)
 
     except Exception as e:
-        logger.error(f"Get kanji details error: {e}")
+        logger.error(
+            f"Tool execution error: {type(e).__name__}",
+            exc_info=True,
+            extra={
+                "tool": "kanjialive_get_kanji_details",
+                "params": params.model_dump()
+            }
+        )
         return _handle_api_error(e)
 
 
@@ -887,13 +1128,12 @@ if __name__ == "__main__":
     # Configure logging
     logging.basicConfig(level=logging.INFO)
 
-    # Warn if API key is not configured
-    if RAPIDAPI_KEY == "YOUR_RAPIDAPI_KEY_HERE":
-        logger.warning("=" * 80)
-        logger.warning("WARNING: RapidAPI key not configured!")
-        logger.warning("Please set the RAPIDAPI_KEY environment variable or update the script.")
-        logger.warning("Get your free API key at:")
-        logger.warning("https://rapidapi.com/KanjiAlive/api/learn-to-read-and-write-japanese-kanji")
-        logger.warning("=" * 80)
+    # Validate API key on startup
+    try:
+        _get_api_headers()
+        logger.info("API key validated successfully")
+    except ValueError as e:
+        logger.error(str(e))
+        sys.exit(1)
 
     mcp.run()
