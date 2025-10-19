@@ -83,7 +83,7 @@ Add the server to your Claude Desktop configuration file:
 }
 ```
 
-Replace `/path/to/ka-mcp` with the actual path to this directory.
+Replace `/path/to/ka-mcp` with the actual path to this directory. You can also set your RapidAPI key as an environment variable here.
 
 ### 5. Restart Claude Desktop
 
