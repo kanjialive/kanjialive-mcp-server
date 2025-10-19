@@ -1,6 +1,6 @@
 # Kanji Alive MCP Server
 
-An Model Context Protocol (MCP) server that provides access to the [Kanji Alive API](https://app.kanjialive.com/api/docs) for searching and retrieving information about Japanese kanji. Note: This is an experimental project created with Claude using the [mcp-builder skill](https://github.com/anthropics/skills). 
+A Model Context Protocol (MCP) server that provides access to the [Kanji Alive API](https://app.kanjialive.com/api/docs) for searching and retrieving information about Japanese kanji. Note: This is an experimental project created with Claude using the [mcp-builder skill](https://github.com/anthropics/skills). 
 
 ## Overview
 
@@ -46,6 +46,8 @@ pip install -r requirements.txt
 
 ### 3. Configure API Key
 
+**Important:** The server now validates the API key on startup and will fail immediately if not configured properly.
+
 Set your RapidAPI key as an environment variable:
 
 ```bash
@@ -59,10 +61,7 @@ set RAPIDAPI_KEY=your_api_key_here
 $env:RAPIDAPI_KEY="your_api_key_here"
 ```
 
-Alternatively, edit line 39 in `kanjialive_mcp.py` to set the key directly:
-```python
-RAPIDAPI_KEY = "your_api_key_here"
-```
+**Note:** Setting the key directly in the code is no longer supported. The API key must be provided via the `RAPIDAPI_KEY` environment variable.
 
 ### 4. Configure Claude Desktop
 
@@ -127,10 +126,44 @@ The server provides three MCP tools:
   - Onyomi readings: romaji or katakana (e.g., "shin" or "シン")
   - Kunyomi readings: romaji or hiragana (e.g., "oya" or "おや")
   - Radical positions: romaji or hiragana (e.g., "hen" or "へん")
+- **Unicode Normalization**: Automatically normalizes Japanese text input (NFKC) for consistent handling
 - **Input Validation**: Helpful error messages guide correct script usage (katakana vs hiragana)
-- **Automatic Retry**: Resilient API calls with exponential backoff for transient failures
+- **Automatic Retry**: Resilient API calls with exponential backoff and Retry-After header support
+- **Response Validation**: Validates API response structure before processing
+- **Connection Pooling**: HTTP client reuse for improved performance across multiple requests
+- **URL Encoding**: Proper handling of special characters in search queries
 - **Safe Markdown Rendering**: Properly escapes special characters in kanji data
+- **Secure Error Handling**: Sanitized user-facing error messages with detailed server-side logging
+- **Runtime Security**: API key validation on startup with fail-fast behavior
 - **Consistent Output**: Harmonized JSON structure across all endpoints
+
+## Development
+
+### Running Tests
+
+The project includes a comprehensive test suite with 20 tests covering validators and formatters.
+
+```bash
+# Install development dependencies
+pip install -r requirements-dev.txt
+
+# Run all tests
+pytest tests/ -v
+
+# Run tests with coverage report
+pytest tests/ -v --cov=kanjialive_mcp --cov-report=term-missing
+
+# Run specific test files
+pytest tests/test_validators.py -v
+pytest tests/test_formatters.py -v
+```
+
+### Test Coverage
+
+Current test coverage: **49%** (20 passing tests)
+
+- Validator tests: Input validation, Unicode normalization, field validators
+- Formatter tests: Markdown escaping, result formatting, metadata creation
 
 ## API Documentation
 
