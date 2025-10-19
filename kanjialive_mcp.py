@@ -17,9 +17,11 @@ RapidAPI Endpoint: https://rapidapi.com/KanjiAlive/api/learn-to-read-and-write-j
 """
 
 import asyncio
+import atexit
 import json
 import logging
 import datetime
+import random
 import re
 import sys
 import unicodedata
@@ -110,6 +112,38 @@ async def _cleanup_client() -> None:
         _async_client = None
         logger.debug("Closed shared HTTP client")
 
+
+def _cleanup_client_sync() -> None:
+    """
+    Synchronous wrapper for cleanup_client to be used with atexit.
+
+    Handles both running and non-running event loops gracefully.
+    """
+    global _async_client
+
+    if _async_client is None:
+        return
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If loop is running, schedule cleanup as a task
+            loop.create_task(_cleanup_client())
+        else:
+            # If loop is not running, run cleanup synchronously
+            loop.run_until_complete(_cleanup_client())
+    except RuntimeError:
+        # No event loop available, try creating a new one
+        try:
+            asyncio.run(_cleanup_client())
+        except Exception as e:
+            logger.warning(f"Failed to cleanup HTTP client on exit: {e}")
+
+
+# Register cleanup handler to run on process exit
+atexit.register(_cleanup_client_sync)
+
+
 def _normalize_japanese_text(text: str) -> str:
     """
     Normalize Japanese text to NFKC form.
@@ -168,12 +202,6 @@ class ResponseFormat(str, Enum):
     """Output format for tool responses."""
     MARKDOWN = "markdown"
     JSON = "json"
-
-
-class SortMode(str, Enum):
-    """Sort mode for search results."""
-    KANJI_STROKE = "kanji"  # Sort by kanji stroke number
-    RADICAL_STROKE = "radical"  # Sort by radical stroke number
 
 
 # ============================================================================
@@ -438,6 +466,7 @@ async def _make_api_request(
     # Retry configuration
     max_retries = 3
     backoff = 0.5  # Initial backoff in seconds
+    max_backoff = 30.0  # Maximum backoff cap in seconds
 
     client = await get_client()
     last_exception = None
@@ -481,20 +510,26 @@ async def _make_api_request(
                                 f"Waiting {delay}s before retry (attempt {attempt}/{max_retries})"
                             )
                         else:
-                            delay = backoff
+                            # Apply jitter and cap to backoff
+                            base = min(backoff, max_backoff)
+                            jitter = random.uniform(0, base * 0.1)
+                            delay = min(base + jitter, max_backoff)
                             logger.warning(
                                 f"Rate limited (429), no Retry-After header. "
-                                f"Using exponential backoff: {delay}s (attempt {attempt}/{max_retries})"
+                                f"Using exponential backoff with jitter: {delay:.2f}s (attempt {attempt}/{max_retries})"
                             )
                     else:
-                        delay = backoff
+                        # Apply jitter and cap to backoff for server errors
+                        base = min(backoff, max_backoff)
+                        jitter = random.uniform(0, base * 0.1)
+                        delay = min(base + jitter, max_backoff)
                         logger.warning(
                             f"Server error {status}, "
-                            f"retrying in {delay}s (attempt {attempt}/{max_retries})"
+                            f"retrying in {delay:.2f}s (attempt {attempt}/{max_retries})"
                         )
 
                     await asyncio.sleep(delay)
-                    backoff = max(backoff * 2, delay)  # Ensure backoff increases
+                    backoff = min(backoff * 2, max_backoff)  # Cap backoff growth
                     continue
             # For other HTTP errors, don't retry
             raise
@@ -502,12 +537,16 @@ async def _make_api_request(
         except (httpx.RequestError, httpx.TimeoutException) as e:
             last_exception = e
             if attempt < max_retries:
+                # Apply jitter and cap to backoff for network errors
+                base = min(backoff, max_backoff)
+                jitter = random.uniform(0, base * 0.1)
+                delay = min(base + jitter, max_backoff)
                 logger.warning(
                     f"Network error: {type(e).__name__}, "
-                    f"retrying in {backoff}s (attempt {attempt}/{max_retries})"
+                    f"retrying in {delay:.2f}s (attempt {attempt}/{max_retries})"
                 )
-                await asyncio.sleep(backoff)
-                backoff *= 2  # Exponential backoff
+                await asyncio.sleep(delay)
+                backoff = min(backoff * 2, max_backoff)  # Cap backoff growth
                 continue
             # If this was the last attempt, raise
             raise
