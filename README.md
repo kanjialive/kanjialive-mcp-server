@@ -59,7 +59,7 @@ set RAPIDAPI_KEY=your_api_key_here
 $env:RAPIDAPI_KEY="your_api_key_here"
 ```
 
-Alternatively, edit line 36 in `kanjialive_mcp.py` to set the key directly:
+Alternatively, edit line 39 in `kanjialive_mcp.py` to set the key directly:
 ```python
 RAPIDAPI_KEY = "your_api_key_here"
 ```
@@ -120,6 +120,17 @@ The server provides three MCP tools:
 1. **kanjialive_search_basic** - Simple search by kanji, reading, or meaning
 2. **kanjialive_search_advanced** - Complex searches with multiple filters (stroke count, grade, radical, etc.)
 3. **kanjialive_get_kanji_details** - Comprehensive information for a specific kanji
+
+### Features
+
+- **Bilingual Input Support**: Accepts both romaji (English) and Japanese scripts (hiragana/katakana)
+  - Onyomi readings: romaji or katakana (e.g., "shin" or "シン")
+  - Kunyomi readings: romaji or hiragana (e.g., "oya" or "おや")
+  - Radical positions: romaji or hiragana (e.g., "hen" or "へん")
+- **Input Validation**: Helpful error messages guide correct script usage (katakana vs hiragana)
+- **Automatic Retry**: Resilient API calls with exponential backoff for transient failures
+- **Safe Markdown Rendering**: Properly escapes special characters in kanji data
+- **Consistent Output**: Harmonized JSON structure across all endpoints
 
 ## API Documentation
 
