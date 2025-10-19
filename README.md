@@ -1,6 +1,6 @@
 # Kanji Alive MCP Server
 
-A Model Context Protocol (MCP) server that provides access to the [Kanji Alive API](https://app.kanjialive.com/api/docs) for searching and retrieving information about Japanese kanji. Note: This is an experimental project created with Claude using the [mcp-builder skill](https://github.com/anthropics/skills). 
+An experimental Model Context Protocol (MCP) server that provides access to the [Kanji Alive API](https://app.kanjialive.com/api/docs) for searching and retrieving information about Japanese kanji. 
 
 ## Overview
 
@@ -169,6 +169,10 @@ Current test coverage: **49%** (20 passing tests)
 
 - [Kanji Alive API Documentation](https://app.kanjialive.com/api/docs)
 - [RapidAPI Endpoint](https://rapidapi.com/KanjiAlive/api/learn-to-read-and-write-japanese-kanji)
+
+## Credit
+
+Initially vibe coded with Claude using the [mcp-builder skill](https://github.com/anthropics/skills). Subsequent revisions based on GPT-5 and Claude Sonnet 4.5 code reviews, selectively implemented by Claude Code.
 
 ## License
 
