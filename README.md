@@ -4,7 +4,7 @@ An experimental Model Context Protocol (MCP) server that provides access to the 
 
 ## Overview
 
-This MCP server enables Claude to search and retrieve detailed information about 1,235 kanji taught in Japanese elementary schools, including:
+This MCP server enables you to search and retrieve detailed information about 1,235 kanji taught in Japanese elementary schools, including:
 
 - Kanji meanings, readings (Onyomi/Kunyomi), and stroke counts
 - Radical information and positions
@@ -17,7 +17,7 @@ This MCP server enables Claude to search and retrieve detailed information about
 
 - Python 3.10 or higher
 - A RapidAPI key (free tier available)
-- Claude Desktop application
+- Claude Desktop application (recommended)
 
 ## Installation
 
@@ -46,7 +46,7 @@ pip install -r requirements.txt
 
 ### 3. Configure API Key
 
-**Important:** The server now validates the API key on startup and will fail immediately if not configured properly.
+**Important:** The server validates the API key on startup and will fail immediately if not configured properly.
 
 Set your RapidAPI key as an environment variable:
 
@@ -60,8 +60,6 @@ set RAPIDAPI_KEY=your_api_key_here
 # On Windows (PowerShell):
 $env:RAPIDAPI_KEY="your_api_key_here"
 ```
-
-**Note:** Setting the key directly in the code is no longer supported. The API key must be provided via the `RAPIDAPI_KEY` environment variable.
 
 ### 4. Configure Claude Desktop
 
@@ -172,7 +170,7 @@ Current test coverage: **49%** (20 passing tests)
 
 ## Credit
 
-Initially vibe coded with Claude using the [mcp-builder skill](https://github.com/anthropics/skills). Subsequent revisions based on GPT-5 and Claude Sonnet 4.5 code reviews, selectively implemented by Claude Code.
+Initially vibe coded with Claude using the [mcp-builder skill](https://github.com/anthropics/skills). Subsequent revisions drawn from GPT-5 and Claude Sonnet 4.5 code reviews, selectively implemented in Claude Code.
 
 ## License
 
