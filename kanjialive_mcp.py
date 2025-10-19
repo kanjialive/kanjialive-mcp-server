@@ -16,9 +16,11 @@ API Documentation: https://app.kanjialive.com/api/docs
 RapidAPI Endpoint: https://rapidapi.com/KanjiAlive/api/learn-to-read-and-write-japanese-kanji
 """
 
+import asyncio
 import json
 import logging
 import datetime
+import re
 from enum import Enum
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -38,26 +40,53 @@ RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "YOUR_RAPIDAPI_KEY_HERE")
 RAPIDAPI_HOST = "kanjialive-api.p.rapidapi.com"
 
 # API Headers for RapidAPI authentication
+USER_AGENT = "kanjialive-mcp/1.0 (+https://github.com/kanjialive-mcp-server)"
 API_HEADERS = {
     "X-RapidAPI-Key": RAPIDAPI_KEY,
-    "X-RapidAPI-Host": RAPIDAPI_HOST
+    "X-RapidAPI-Host": RAPIDAPI_HOST,
+    "User-Agent": USER_AGENT
 }
 
-# Logging configuration
-logging.basicConfig(level=logging.INFO)
+# Logger (configured in main)
 logger = logging.getLogger(__name__)
-
-# Warn if API key is not configured
-if RAPIDAPI_KEY == "YOUR_RAPIDAPI_KEY_HERE":
-    logger.warning("=" * 80)
-    logger.warning("WARNING: RapidAPI key not configured!")
-    logger.warning("Please set the RAPIDAPI_KEY environment variable or update the script.")
-    logger.warning("Get your free API key at:")
-    logger.warning("https://rapidapi.com/KanjiAlive/api/learn-to-read-and-write-japanese-kanji")
-    logger.warning("=" * 80)
 
 # Initialize FastMCP server
 mcp = FastMCP("kanjialive_mcp")
+
+# Markdown escaping
+_MD_SPECIAL = re.compile(r'([\\`*_{}[\]()#+\-.!|>])')
+
+def _escape_markdown(text: str) -> str:
+    """
+    Escape special Markdown characters to prevent formatting issues.
+
+    Args:
+        text: String that may contain Markdown special characters
+
+    Returns:
+        Escaped string safe for Markdown output
+    """
+    if not isinstance(text, str):
+        return str(text)
+    return _MD_SPECIAL.sub(r'\\\1', text)
+
+# Validation constants for radical positions
+VALID_RADICAL_POSITIONS = {
+    # Romaji (lowercase)
+    'hen', 'tsukuri', 'kanmuri', 'ashi', 'kamae', 'tare', 'nyou',
+    # Hiragana
+    'へん', 'つくり', 'かんむり', 'あし', 'かまえ', 'たれ', 'にょう'
+}
+
+RPOS_NORMALIZE = {
+    'へん': 'hen',
+    'つくり': 'tsukuri',
+    'かんむり': 'kanmuri',
+    'あし': 'ashi',
+    'かまえ': 'kamae',
+    'たれ': 'tare',
+    'にょう': 'nyou'
+}
 
 
 class ResponseFormat(str, Enum):
@@ -162,10 +191,83 @@ class KanjiAdvancedSearchInput(BaseModel):
         description="Output format: 'markdown' for human-readable or 'json' for structured data"
     )
 
-    @field_validator('on', 'kun', 'rjn', 'kem', 'rem', 'rpos')
+    @field_validator('on')
+    @classmethod
+    def validate_onyomi(cls, v: Optional[str]) -> Optional[str]:
+        """Validate Onyomi reading format (romaji or katakana only)."""
+        if v is None:
+            return v
+
+        v = v.strip()
+
+        # Pattern for pure katakana (including middle dot, iteration marks)
+        katakana_pattern = r'^[\u30A0-\u30FF\u30FB-\u30FE・]+$'
+        # Pattern for pure romaji (ASCII letters, hyphens for compounds)
+        romaji_pattern = r'^[a-zA-Z\-]+$'
+
+        is_katakana = re.match(katakana_pattern, v)
+        is_romaji = re.match(romaji_pattern, v)
+
+        if not (is_katakana or is_romaji):
+            raise ValueError(
+                f"Invalid Onyomi reading '{v}'. "
+                f"Must be either romaji (e.g., 'shin') or katakana (e.g., 'シン'). "
+                f"Do not mix scripts or use hiragana for Onyomi."
+            )
+
+        # Normalize romaji to lowercase for consistency
+        return v.lower() if is_romaji else v
+
+    @field_validator('kun', 'rjn')
+    @classmethod
+    def validate_hiragana_or_romaji(cls, v: Optional[str]) -> Optional[str]:
+        """Validate Kunyomi/radical name format (romaji or hiragana only)."""
+        if v is None:
+            return v
+
+        v = v.strip()
+
+        # Pattern for pure hiragana (including iteration marks, small kana, dots for okurigana)
+        hiragana_pattern = r'^[\u3040-\u309F\u3099-\u309C.・]+$'
+        # Pattern for pure romaji (ASCII letters, dots for okurigana, hyphens)
+        romaji_pattern = r'^[a-zA-Z.\-]+$'
+
+        is_hiragana = re.match(hiragana_pattern, v)
+        is_romaji = re.match(romaji_pattern, v)
+
+        if not (is_hiragana or is_romaji):
+            raise ValueError(
+                f"Invalid reading '{v}'. "
+                f"Must be either romaji (e.g., 'oya') or hiragana (e.g., 'おや'). "
+                f"Do not mix scripts or use katakana."
+            )
+
+        # Normalize romaji to lowercase
+        return v.lower() if is_romaji else v
+
+    @field_validator('rpos')
+    @classmethod
+    def validate_radical_position(cls, v: Optional[str]) -> Optional[str]:
+        """Validate and normalize radical position."""
+        if v is None:
+            return v
+
+        v_lower = v.strip().lower()
+
+        if v_lower not in VALID_RADICAL_POSITIONS:
+            raise ValueError(
+                f"Invalid radical position '{v}'. "
+                f"Valid romaji: hen, tsukuri, kanmuri, ashi, kamae, tare, nyou. "
+                f"Valid hiragana: へん, つくり, かんむり, あし, かまえ, たれ, にょう"
+            )
+
+        # Normalize hiragana to romaji for API consistency
+        return RPOS_NORMALIZE.get(v_lower, v_lower)
+
+    @field_validator('kem', 'rem')
     @classmethod
     def strip_whitespace(cls, v: Optional[str]) -> Optional[str]:
-        """Strip whitespace from string fields."""
+        """Strip whitespace from English meaning fields."""
         return v.strip() if v else v
 
     def has_any_filter(self) -> bool:
@@ -197,26 +299,18 @@ class KanjiDetailInput(BaseModel):
 
 
 class SearchResultMetadata(BaseModel):
-    """Metadata about search results to guarantee completeness."""
-    total_results: int = Field(description="Total kanji matching criteria")
-    results_returned: int = Field(description="Number of kanji actually in response")
+    """Metadata about search results."""
+    results_returned: int = Field(description="Number of kanji in response")
     fields_included: List[str] = Field(description="All top-level fields in each kanji object")
     timestamp: str = Field(description="ISO format timestamp of search")
     query_parameters: Dict[str, Any] = Field(description="Parameters used in search")
-    
-    def is_complete(self) -> bool:
-        """Check if all results were returned."""
-        return self.total_results == self.results_returned
-    
+
     def to_markdown_header(self) -> str:
         """Format metadata as markdown header section."""
-        status = "✓ COMPLETE" if self.is_complete() else "✗ INCOMPLETE"
         params_str = ", ".join([f"{k}={v}" for k, v in self.query_parameters.items()])
         return (
-            f"## Result Completeness\n\n"
-            f"- **Total Results:** {self.total_results}\n"
+            f"## Search Information\n\n"
             f"- **Results Returned:** {self.results_returned}\n"
-            f"- **Status:** {status}\n"
             f"- **Fields Included:** {', '.join(self.fields_included)}\n"
             f"- **Query Parameters:** {params_str}\n"
             f"- **Generated:** {self.timestamp}\n\n"
@@ -234,10 +328,7 @@ async def _make_api_request(
     """
     Make an API request to Kanji Alive via RapidAPI.
 
-    IMPORTANT FOR DATA COMPLETENESS:
-    ================================
     This function returns BOTH the API response AND metadata about the request.
-    Never discard the response - always use complete results returned by the API.
 
     Args:
         endpoint: API endpoint path
@@ -253,18 +344,61 @@ async def _make_api_request(
         httpx.TimeoutException: If the request times out
     """
     url = f"{API_BASE_URL}/{endpoint}"
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-        response = await client.get(url, params=params, headers=API_HEADERS)
-        response.raise_for_status()
-        
-        # Track request metadata
-        request_info = {
-            "endpoint": endpoint,
-            "params": params or {},
-            "timestamp": datetime.datetime.now().isoformat()
-        }
-        
-        return response.json(), request_info
+
+    # Retry configuration
+    max_retries = 3
+    backoff = 0.5  # Initial backoff in seconds
+
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT, headers=API_HEADERS) as client:
+        last_exception = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = await client.get(url, params=params)
+                response.raise_for_status()
+
+                # Track request metadata
+                request_info = {
+                    "endpoint": endpoint,
+                    "params": params or {},
+                    "timestamp": datetime.datetime.now().isoformat()
+                }
+
+                return response.json(), request_info
+
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                # Retry on rate limiting (429) and server errors (5xx)
+                if status == 429 or 500 <= status < 600:
+                    last_exception = e
+                    if attempt < max_retries:
+                        logger.warning(
+                            f"Request failed with status {status}, "
+                            f"retrying in {backoff}s (attempt {attempt}/{max_retries})"
+                        )
+                        await asyncio.sleep(backoff)
+                        backoff *= 2  # Exponential backoff
+                        continue
+                # For other HTTP errors, don't retry
+                raise
+
+            except (httpx.ConnectError, httpx.ReadTimeout) as e:
+                last_exception = e
+                if attempt < max_retries:
+                    logger.warning(
+                        f"Network error: {type(e).__name__}, "
+                        f"retrying in {backoff}s (attempt {attempt}/{max_retries})"
+                    )
+                    await asyncio.sleep(backoff)
+                    backoff *= 2  # Exponential backoff
+                    continue
+                # If this was the last attempt, raise
+                raise
+
+        # If we exhausted all retries, raise the last exception
+        if last_exception:
+            raise last_exception
+        raise httpx.HTTPError("Request failed after retries")
 
 
 def _handle_api_error(e: Exception) -> str:
@@ -307,18 +441,16 @@ def _format_search_results_markdown(
 ) -> str:
     """
     Format search results in markdown for human readability.
-    
-    COMPLETENESS GUARANTEE:
-    =======================
-    This function displays metadata showing whether ALL results are included.
-    Users can visually verify data completeness before proceeding.
-    
+
+    Note: The API does not expose a canonical total result count;
+    we display the number of results actually returned.
+
     Args:
         results: List of kanji objects from the API
         metadata: SearchResultMetadata object (optional)
 
     Returns:
-        Markdown-formatted string with completeness indicators
+        Markdown-formatted string
     """
     if not results:
         return "No kanji found matching your search criteria."
@@ -357,17 +489,11 @@ def _format_search_results_markdown(
         radical_char = radical.get('character', 'N/A')
         radical_strokes = radical.get('strokes', 'N/A')
 
-        output += f"| {char} | {meaning} | {strokes} | {grade} | {radical_char} | {radical_strokes} |\n"
+        # Escape dynamic content for Markdown safety
+        output += f"| {char} | {_escape_markdown(meaning)} | {strokes} | {grade} | {radical_char} | {radical_strokes} |\n"
 
     output += f"\n**Total Results Shown:** {len(results)}\n"
-    
-    # Add warning if results appear incomplete
-    if metadata and not metadata.is_complete():
-        output += (
-            f"\n⚠️ **WARNING: Incomplete Results**\n"
-            f"Expected {metadata.total_results} results but only received {metadata.results_returned}.\n"
-        )
-    
+
     return output
 
 
@@ -388,7 +514,7 @@ def _format_kanji_detail_markdown(kanji: Dict[str, Any]) -> str:
     grade = k_info.get('grade', 'N/A')
 
     output = f"# {char} - Kanji Details\n\n"
-    output += f"**Meaning:** {meaning}\n\n"
+    output += f"**Meaning:** {_escape_markdown(meaning)}\n\n"
 
     # Basic info
     output += "## Basic Information\n\n"
@@ -430,8 +556,8 @@ def _format_kanji_detail_markdown(kanji: Dict[str, Any]) -> str:
         rad_position = radical.get('position', {}).get('hiragana', '')
 
         output += f"- **Character:** {rad_char}\n"
-        output += f"- **Meaning:** {rad_meaning}\n"
-        output += f"- **Name:** {rad_name_hira} ({rad_name_roma})\n"
+        output += f"- **Meaning:** {_escape_markdown(rad_meaning)}\n"
+        output += f"- **Name:** {rad_name_hira} ({_escape_markdown(rad_name_roma)})\n"
         output += f"- **Strokes:** {rad_strokes}\n"
         if rad_position:
             output += f"- **Position:** {rad_position}\n"
@@ -457,31 +583,13 @@ def _format_kanji_detail_markdown(kanji: Dict[str, Any]) -> str:
             audio = ex.get('audio', {})
             audio_url = audio.get('opus', '') or audio.get('aac', '') or audio.get('ogg', '')
 
-            output += f"### {japanese}\n"
-            output += f"**Meaning:** {meaning_en}\n"
+            output += f"### {_escape_markdown(japanese)}\n"
+            output += f"**Meaning:** {_escape_markdown(meaning_en)}\n"
             if audio_url:
-                output += f"**Audio:** {audio_url}\n"
+                output += f"**Audio:** <{audio_url}>\n"
             output += "\n"
 
     return output
-
-
-def _truncate_if_needed(content: str, data_count: int = 0) -> str:
-    """
-    Return content without truncation.
-    
-    For educational purposes (kanji learning), ALL data must be preserved.
-    Students need complete information including all example words, readings,
-    and search results. Data truncation would harm the learning experience.
-    
-    Args:
-        content: The content to return
-        data_count: Number of data items (not used, kept for backwards compatibility)
-    
-    Returns:
-        Complete, untruncated content
-    """
-    return content
 
 
 def _extract_fields_from_results(results: List[Dict[str, Any]]) -> List[str]:
@@ -514,34 +622,24 @@ def _create_search_metadata(
 ) -> SearchResultMetadata:
     """
     Create metadata object for search results.
-    
-    IMPORTANT: This validates that results are complete by checking
-    the actual response from the API against expected structure.
-    
+
     Args:
         results: List of kanji returned from API
         query_params: Query parameters used in search
         request_info: Request metadata (endpoint, timestamp)
-    
+
     Returns:
-        SearchResultMetadata object with completeness information
+        SearchResultMetadata object with result information
     """
     fields = _extract_fields_from_results(results)
-    
+
     metadata = SearchResultMetadata(
-        total_results=len(results),
         results_returned=len(results),
         fields_included=fields,
         timestamp=request_info['timestamp'],
         query_parameters=query_params
     )
-    
-    if not metadata.is_complete():
-        logger.warning(
-            f"Incomplete search results detected: "
-            f"expected {metadata.total_results}, got {metadata.results_returned}"
-        )
-    
+
     return metadata
 
 
@@ -563,11 +661,9 @@ async def kanjialive_search_basic(params: KanjiBasicSearchInput) -> str:
     """
     Search for kanji using a simple search term.
 
-    IMPORTANT - DATA COMPLETENESS:
-    ===============================
-    This tool performs a basic search on the complete Kanji Alive database.
-    All matching kanji are returned. Do NOT manually subset or hard-code results.
-    
+    This tool performs a basic search on the Kanji Alive database and returns
+    all matching results from the API.
+
     Valid search terms include:
     - A single kanji character (e.g., 親, 見, 日)
     - An Onyomi reading in katakana (e.g., シン, ケン)
@@ -582,7 +678,7 @@ async def kanjialive_search_basic(params: KanjiBasicSearchInput) -> str:
             - response_format (str): Output format ('markdown' or 'json')
 
     Returns:
-        str: Complete search results with metadata showing ALL matching kanji
+        str: Search results with metadata
     """
     try:
         logger.info(f"Basic search: {params.query}")
@@ -591,32 +687,23 @@ async def kanjialive_search_basic(params: KanjiBasicSearchInput) -> str:
         # Ensure results is a list
         if not isinstance(results, list):
             results = [results]
-        
+
         # Create metadata for this search
         metadata = _create_search_metadata(
             results=results,
             query_params={"query": params.query},
             request_info=request_info
         )
-        
-        logger.info(
-            f"Basic search returned {metadata.results_returned} results "
-            f"(complete: {metadata.is_complete()})"
-        )
+
+        logger.info(f"Basic search returned {metadata.results_returned} results")
 
         if params.response_format == ResponseFormat.JSON:
-            return _truncate_if_needed(
-                json.dumps({
-                    "metadata": metadata.model_dump(),
-                    "results": results
-                }, ensure_ascii=False, indent=2),
-                len(results)
-            )
+            return json.dumps({
+                "metadata": metadata.model_dump(),
+                "results": results
+            }, ensure_ascii=False, indent=2)
         else:
-            return _truncate_if_needed(
-                _format_search_results_markdown(results, metadata),
-                len(results)
-            )
+            return _format_search_results_markdown(results, metadata)
 
     except Exception as e:
         logger.error(f"Basic search error: {e}")
@@ -637,16 +724,6 @@ async def kanjialive_search_advanced(params: KanjiAdvancedSearchInput) -> str:
     """
     Search for kanji using multiple filter criteria.
 
-    IMPORTANT - DATA COMPLETENESS FOR EDUCATIONAL USE:
-    ====================================================
-    This tool returns ALL kanji matching your filter criteria.
-    Do NOT manually hard-code results or assume you know what results should be returned.
-    
-    For example:
-    - grade=2, rs=8 returns ALL 7 matching kanji (not just 5)
-    - Never assume you can skip the API query
-    - Always use the complete results returned
-    
     This tool provides advanced search capabilities with multiple filter options that can be
     combined to narrow down results. You can search by kanji properties, readings, meanings,
     radical characteristics, stroke counts, and grade levels.
@@ -670,7 +747,7 @@ async def kanjialive_search_advanced(params: KanjiAdvancedSearchInput) -> str:
         params (KanjiAdvancedSearchInput): Advanced search parameters
 
     Returns:
-        str: ALL kanji matching criteria with metadata showing completeness
+        str: All kanji matching criteria with metadata
     """
     try:
         if not params.has_any_filter():
@@ -712,39 +789,26 @@ async def kanjialive_search_advanced(params: KanjiAdvancedSearchInput) -> str:
         # Ensure results is a list
         if not isinstance(results, list):
             results = [results]
-        
+
         # Create metadata for this search
         metadata = _create_search_metadata(
             results=results,
             query_params=query_params,
             request_info=request_info
         )
-        
+
         logger.info(
             f"Advanced search returned {metadata.results_returned} results "
-            f"matching criteria {query_params} (complete: {metadata.is_complete()})"
+            f"matching criteria {query_params}"
         )
-        
-        # Alert if results are incomplete
-        if not metadata.is_complete():
-            logger.warning(
-                f"INCOMPLETE RESULTS: Expected {metadata.total_results}, "
-                f"but only received {metadata.results_returned}"
-            )
 
         if params.response_format == ResponseFormat.JSON:
-            return _truncate_if_needed(
-                json.dumps({
-                    "metadata": metadata.model_dump(),
-                    "results": results
-                }, ensure_ascii=False, indent=2),
-                len(results)
-            )
+            return json.dumps({
+                "metadata": metadata.model_dump(),
+                "results": results
+            }, ensure_ascii=False, indent=2)
         else:
-            return _truncate_if_needed(
-                _format_search_results_markdown(results, metadata),
-                len(results)
-            )
+            return _format_search_results_markdown(results, metadata)
 
     except Exception as e:
         logger.error(f"Advanced search error: {e}")
@@ -796,16 +860,19 @@ async def kanjialive_get_kanji_details(params: KanjiDetailInput) -> str:
     """
     try:
         logger.info(f"Get kanji details: {params.character}")
-        kanji_data = await _make_api_request(f"kanji/{params.character}")
+        kanji_data, request_info = await _make_api_request(f"kanji/{params.character}")
 
         if params.response_format == ResponseFormat.JSON:
-            return _truncate_if_needed(
-                json.dumps(kanji_data, ensure_ascii=False, indent=2)
-            )
+            # Harmonize with search output structure
+            return json.dumps({
+                "metadata": {
+                    "timestamp": request_info['timestamp'],
+                    "endpoint": request_info['endpoint']
+                },
+                "kanji": kanji_data
+            }, ensure_ascii=False, indent=2)
         else:
-            return _truncate_if_needed(
-                _format_kanji_detail_markdown(kanji_data)
-            )
+            return _format_kanji_detail_markdown(kanji_data)
 
     except Exception as e:
         logger.error(f"Get kanji details error: {e}")
@@ -817,4 +884,16 @@ async def kanjialive_get_kanji_details(params: KanjiDetailInput) -> str:
 # ============================================================================
 
 if __name__ == "__main__":
+    # Configure logging
+    logging.basicConfig(level=logging.INFO)
+
+    # Warn if API key is not configured
+    if RAPIDAPI_KEY == "YOUR_RAPIDAPI_KEY_HERE":
+        logger.warning("=" * 80)
+        logger.warning("WARNING: RapidAPI key not configured!")
+        logger.warning("Please set the RAPIDAPI_KEY environment variable or update the script.")
+        logger.warning("Get your free API key at:")
+        logger.warning("https://rapidapi.com/KanjiAlive/api/learn-to-read-and-write-japanese-kanji")
+        logger.warning("=" * 80)
+
     mcp.run()
