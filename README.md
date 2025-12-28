@@ -18,7 +18,7 @@ This MCP server enables you to search and retrieve detailed information about 1,
 - Python 3.10 or higher
 - [uv](https://docs.astral.sh/uv/) package manager
 - A RapidAPI key (free tier available)
-- Claude Desktop application (recommended)
+- An MCP-compatible client ([Claude Desktop](https://claude.ai/download) recommended)
 
 ## Installation
 
@@ -61,9 +61,15 @@ set RAPIDAPI_KEY=your_api_key_here
 $env:RAPIDAPI_KEY="your_api_key_here"
 ```
 
-### 5. Configure Claude Desktop
+### 5. Configure Your MCP Client
 
-Add the server to your Claude Desktop configuration file:
+This server works with any MCP-compatible client. Configuration varies by client; below is the setup for Claude Desktop.
+
+**Other clients:** Consult your client's documentation for MCP server configuration. You'll need to provide the Python path (`.venv/bin/python`), script path (`kanjialive_mcp.py`), and the `RAPIDAPI_KEY` environment variable.
+
+#### Claude Desktop
+
+Add the server to your configuration file:
 
 **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
@@ -85,13 +91,13 @@ Add the server to your Claude Desktop configuration file:
 
 Replace `/path/to/kanjialive-mcp-server` with the actual path to this directory.
 
-### 6. Restart Claude Desktop
+### 6. Restart Your Client
 
-After updating the configuration, restart Claude Desktop for changes to take effect.
+Restart your MCP client for changes to take effect.
 
 ## Usage
 
-Once configured, you can ask Claude to search for kanji information:
+Once configured, you can ask your LLM to search for kanji information:
 
 ### Basic Search Examples
 
