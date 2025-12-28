@@ -1,6 +1,6 @@
 # Kanji Alive MCP Server
 
-An experimental Model Context Protocol (MCP) server that provides access to the [Kanji Alive API](https://app.kanjialive.com/api/docs) for searching and retrieving information about Japanese kanji. 
+A Model Context Protocol (MCP) server that provides access to the [Kanji Alive API](https://app.kanjialive.com/api/docs) for searching and retrieving information about Japanese kanji. 
 
 ## Overview
 
@@ -95,6 +95,14 @@ Replace `/path/to/kanjialive-mcp-server` with the actual path to this directory.
 
 Restart your MCP client for changes to take effect.
 
+#### Claude Desktop Permissions
+
+After restarting, the server appears in **Settings → Connectors → Kanji Alive**. You can set permissions to:
+
+- **Always Allow** - Tools run without confirmation
+- **Needs Approval** - Prompts before each tool use
+- **Blocked** - Claude Desktop won't see the server (tools unavailable)
+
 ## Usage
 
 Once configured, you can ask your LLM to search for kanji information:
@@ -124,7 +132,7 @@ The server provides three MCP tools:
 2. **kanjialive_search_advanced** - Complex searches with multiple filters (stroke count, grade, radical, etc.)
 3. **kanjialive_get_kanji_details** - Comprehensive information for a specific kanji
 
-And two MCP resources for reference data:
+And two (draft) MCP resources for reference data:
 
 - `kanjialive://info/radical-positions` - Valid radical position codes
 - `kanjialive://info/search-parameters` - Advanced search parameter documentation
@@ -183,4 +191,4 @@ Initially vibe coded with Claude using the [mcp-builder skill](https://github.co
 
 ## License
 
-This server implementation is provided as-is under a [MIT license](/blob/main/LICENSE). The [data and media](https://github.com/kanjialive/kanji-data-media) shared via the Kanji Alive API is licensed under Creative Commons CC-BY.
+This server implementation is provided as-is under a [MIT license](/blob/main/LICENSE). The [data and media](https://github.com/kanjialive/kanji-data-media) shared via the Kanji Alive API is licensed under [Creative Commons CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.en).

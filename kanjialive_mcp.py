@@ -83,7 +83,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
 
 # Initialize FastMCP server with lifespan context
 mcp = FastMCP(
-    "kanjialive_mcp",
+    "Kanji Alive",
     instructions=(
         "MCP server for the Kanji Alive API - search and retrieve information about "
         "1,235 Japanese kanji characters taught in Japanese elementary schools. "
