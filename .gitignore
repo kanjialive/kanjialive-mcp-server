@@ -54,3 +54,6 @@ htmlcov/
 # Distribution
 *.tar.gz
 *.zip
+
+# Development notes
+TODO.md
