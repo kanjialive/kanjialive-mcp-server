@@ -17,7 +17,6 @@ RapidAPI Endpoint: https://rapidapi.com/KanjiAlive/api/learn-to-read-and-write-j
 """
 
 import asyncio
-import atexit
 import json
 import logging
 import datetime
@@ -25,12 +24,15 @@ import random
 import re
 import sys
 import unicodedata
-from enum import Enum
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Optional, List, Dict, Any, Tuple
 from urllib.parse import quote
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Context
+from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 # Constants
@@ -47,12 +49,49 @@ USER_AGENT = "kanjialive-mcp/1.0 (+https://github.com/kanjialive-mcp-server)"
 # Logger (configured in main)
 logger = logging.getLogger(__name__)
 
-# Initialize FastMCP server
-mcp = FastMCP("kanjialive_mcp")
 
-# Global HTTP client for connection pooling
-_async_client: Optional[httpx.AsyncClient] = None
-_client_lock = asyncio.Lock()
+# ============================================================================
+# Application Lifespan Context
+# ============================================================================
+
+@dataclass
+class AppContext:
+    """Application context holding shared resources for the server lifetime."""
+    client: httpx.AsyncClient
+
+
+@asynccontextmanager
+async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
+    """
+    Manage application lifecycle resources.
+
+    This context manager handles the creation and cleanup of shared resources
+    like the HTTP client, ensuring proper cleanup on any exit path.
+    """
+    headers = _get_api_headers()
+    client = httpx.AsyncClient(
+        timeout=REQUEST_TIMEOUT,
+        headers=headers
+    )
+    logger.debug("Created HTTP client for server lifespan")
+    try:
+        yield AppContext(client=client)
+    finally:
+        await client.aclose()
+        logger.debug("Closed HTTP client on server shutdown")
+
+
+# Initialize FastMCP server with lifespan context
+mcp = FastMCP(
+    "kanjialive_mcp",
+    instructions=(
+        "MCP server for the Kanji Alive API - search and retrieve information about "
+        "1,235 Japanese kanji characters taught in Japanese elementary schools. "
+        "Provides tools for basic and advanced search, plus detailed kanji information "
+        "including readings, radicals, stroke order, and example words."
+    ),
+    lifespan=app_lifespan
+)
 
 def _get_api_headers() -> Dict[str, str]:
     """
@@ -78,71 +117,6 @@ def _get_api_headers() -> Dict[str, str]:
         "Accept": "application/json",
         "User-Agent": USER_AGENT
     }
-
-async def get_client() -> httpx.AsyncClient:
-    """
-    Get or create the shared AsyncClient instance.
-
-    Uses connection pooling for improved performance across multiple requests.
-
-    Returns:
-        Shared httpx.AsyncClient instance
-    """
-    global _async_client
-
-    if _async_client is None:
-        async with _client_lock:
-            # Double-check after acquiring lock
-            if _async_client is None:
-                headers = _get_api_headers()
-                _async_client = httpx.AsyncClient(
-                    timeout=REQUEST_TIMEOUT,
-                    headers=headers
-                )
-                logger.debug("Created new shared HTTP client")
-
-    return _async_client
-
-async def _cleanup_client() -> None:
-    """Close the shared HTTP client if it exists."""
-    global _async_client
-
-    if _async_client is not None:
-        await _async_client.aclose()
-        _async_client = None
-        logger.debug("Closed shared HTTP client")
-
-
-def _cleanup_client_sync() -> None:
-    """
-    Synchronous wrapper for cleanup_client to be used with atexit.
-
-    Handles both running and non-running event loops gracefully.
-    """
-    global _async_client
-
-    if _async_client is None:
-        return
-
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # If loop is running, schedule cleanup as a task
-            loop.create_task(_cleanup_client())
-        else:
-            # If loop is not running, run cleanup synchronously
-            loop.run_until_complete(_cleanup_client())
-    except RuntimeError:
-        # No event loop available, try creating a new one
-        try:
-            asyncio.run(_cleanup_client())
-        except Exception as e:
-            logger.warning(f"Failed to cleanup HTTP client on exit: {e}")
-
-
-# Register cleanup handler to run on process exit
-atexit.register(_cleanup_client_sync)
-
 
 def _normalize_japanese_text(text: str) -> str:
     """
@@ -198,12 +172,6 @@ RPOS_NORMALIZE = {
 }
 
 
-class ResponseFormat(str, Enum):
-    """Output format for tool responses."""
-    MARKDOWN = "markdown"
-    JSON = "json"
-
-
 # ============================================================================
 # Pydantic Input Models
 # ============================================================================
@@ -213,7 +181,8 @@ class KanjiBasicSearchInput(BaseModel):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         validate_assignment=True,
-        extra='forbid'
+        extra='forbid',
+        json_schema_serialization_defaults_required=True
     )
 
     query: str = Field(
@@ -226,10 +195,6 @@ class KanjiBasicSearchInput(BaseModel):
         ),
         min_length=1,
         max_length=100
-    )
-    response_format: ResponseFormat = Field(
-        default=ResponseFormat.MARKDOWN,
-        description="Output format: 'markdown' for human-readable or 'json' for structured data"
     )
 
     @field_validator('query')
@@ -244,7 +209,8 @@ class KanjiAdvancedSearchInput(BaseModel):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         validate_assignment=True,
-        extra='forbid'
+        extra='forbid',
+        json_schema_serialization_defaults_required=True
     )
 
     on: Optional[str] = Field(
@@ -294,10 +260,6 @@ class KanjiAdvancedSearchInput(BaseModel):
         description="School grade level (1-6) where kanji is taught in Japanese elementary schools",
         ge=1,
         le=6
-    )
-    response_format: ResponseFormat = Field(
-        default=ResponseFormat.MARKDOWN,
-        description="Output format: 'markdown' for human-readable or 'json' for structured data"
     )
 
     @field_validator('on')
@@ -394,7 +356,8 @@ class KanjiDetailInput(BaseModel):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         validate_assignment=True,
-        extra='forbid'
+        extra='forbid',
+        json_schema_serialization_defaults_required=True
     )
 
     character: str = Field(
@@ -402,10 +365,6 @@ class KanjiDetailInput(BaseModel):
         description="The kanji character to look up (親, 見, 日)",
         min_length=1,
         max_length=1
-    )
-    response_format: ResponseFormat = Field(
-        default=ResponseFormat.MARKDOWN,
-        description="Output format: 'markdown' for human-readable or 'json' for structured data"
     )
 
     @field_validator('character')
@@ -435,10 +394,33 @@ class SearchResultMetadata(BaseModel):
 
 
 # ============================================================================
+# Structured Output Models
+# ============================================================================
+
+class KanjiSearchOutput(BaseModel):
+    """Structured output for kanji search tools."""
+    metadata: SearchResultMetadata = Field(description="Search metadata including result count and query parameters")
+    results: List[Dict[str, Any]] = Field(description="List of kanji objects matching the search")
+
+
+class KanjiDetailMetadata(BaseModel):
+    """Metadata for kanji detail response."""
+    timestamp: str = Field(description="ISO format timestamp of request")
+    endpoint: str = Field(description="API endpoint that was called")
+
+
+class KanjiDetailOutput(BaseModel):
+    """Structured output for kanji detail tool."""
+    metadata: KanjiDetailMetadata = Field(description="Request metadata")
+    kanji: Dict[str, Any] = Field(description="Complete kanji data including readings, radical, examples")
+
+
+# ============================================================================
 # Shared Utility Functions
 # ============================================================================
 
 async def _make_api_request(
+    client: httpx.AsyncClient,
     endpoint: str,
     params: Optional[Dict[str, Any]] = None
 ) -> Tuple[Any, Dict[str, Any]]:
@@ -446,9 +428,9 @@ async def _make_api_request(
     Make an API request to Kanji Alive via RapidAPI.
 
     This function returns BOTH the API response AND metadata about the request.
-    Uses a shared HTTP client for connection pooling.
 
     Args:
+        client: HTTP client from lifespan context
         endpoint: API endpoint path
         params: Optional query parameters
 
@@ -468,7 +450,6 @@ async def _make_api_request(
     backoff = 0.5  # Initial backoff in seconds
     max_backoff = 30.0  # Maximum backoff cap in seconds
 
-    client = await get_client()
     last_exception = None
 
     for attempt in range(1, max_retries + 1):
@@ -638,37 +619,41 @@ def _validate_response_not_empty(data: Any, query_info: str) -> None:
         )
 
 
-def _handle_api_error(e: Exception) -> str:
+def _handle_api_error(e: Exception) -> None:
     """
-    Format API errors consistently for all tools.
+    Handle API errors by raising ToolError with formatted message.
+
+    Per MCP spec SEP-1303, tool errors should use isError=True to enable
+    LLM self-correction. Raising ToolError causes the SDK to set isError=True
+    in the response.
 
     Args:
         e: The exception that occurred
 
-    Returns:
-        Formatted error message
+    Raises:
+        ToolError: Always raises with formatted error message
     """
     if isinstance(e, httpx.HTTPStatusError):
         if e.response.status_code == 404:
-            return (
-                "Error: Resource not found. The kanji may not be in the database, "
+            raise ToolError(
+                "Resource not found. The kanji may not be in the database, "
                 "or the search parameters didn't match any results. "
                 "Kanji Alive supports 1,235 kanji taught in Japanese elementary schools."
             )
         elif e.response.status_code == 400:
-            return (
-                "Error: Invalid request. Please check that your search parameters are correct. "
+            raise ToolError(
+                "Invalid request. Please check that your search parameters are correct. "
                 "For readings, use romaji or appropriate Japanese characters."
             )
         elif e.response.status_code == 429:
-            return "Error: Rate limit exceeded. Please wait a moment before making more requests."
+            raise ToolError("Rate limit exceeded. Please wait a moment before making more requests.")
         elif e.response.status_code >= 500:
-            return "Error: Kanji Alive server error. Please try again later."
-        return f"Error: API request failed with status {e.response.status_code}: {e.response.text}"
+            raise ToolError("Kanji Alive server error. Please try again later.")
+        raise ToolError(f"API request failed with status {e.response.status_code}: {e.response.text}")
     elif isinstance(e, httpx.TimeoutException):
-        return "Error: Request timed out. The Kanji Alive API may be experiencing issues. Please try again."
+        raise ToolError("Request timed out. The Kanji Alive API may be experiencing issues. Please try again.")
     elif isinstance(e, httpx.RequestError):
-        return "Error: Network error. Please check your internet connection."
+        raise ToolError("Network error. Please check your internet connection.")
 
     # Log full details for debugging
     logger.error(
@@ -680,9 +665,9 @@ def _handle_api_error(e: Exception) -> str:
         }
     )
 
-    # Return sanitized message to user
-    return (
-        "Error: An unexpected error occurred while processing your request. "
+    # Raise sanitized error message to user
+    raise ToolError(
+        "An unexpected error occurred while processing your request. "
         "Please try again. If the problem persists, check the server logs for details."
     )
 
@@ -901,15 +886,15 @@ def _create_search_metadata(
 
 @mcp.tool(
     name="kanjialive_search_basic",
+    title="Basic Kanji Search",
     annotations={
-        "title": "Basic Kanji Search",
         "readOnlyHint": True,
         "destructiveHint": False,
         "idempotentHint": True,
         "openWorldHint": True
     }
 )
-async def kanjialive_search_basic(params: KanjiBasicSearchInput) -> str:
+async def kanjialive_search_basic(params: KanjiBasicSearchInput, ctx: Context) -> KanjiSearchOutput:
     """
     Search for kanji using a simple search term.
 
@@ -927,15 +912,18 @@ async def kanjialive_search_basic(params: KanjiBasicSearchInput) -> str:
     Args:
         params (KanjiBasicSearchInput): Search parameters containing:
             - query (str): The search term
-            - response_format (str): Output format ('markdown' or 'json')
+        ctx: MCP context for logging and accessing lifespan resources
 
     Returns:
-        str: Search results with metadata
+        KanjiSearchOutput: Structured search results with metadata
     """
     try:
-        logger.info(f"Basic search: {params.query}")
+        # Get HTTP client from lifespan context
+        client = ctx.request_context.lifespan_context.client
+
+        await ctx.info(f"Basic search: {params.query}")
         encoded_query = quote(params.query, safe='')
-        results, request_info = await _make_api_request(f"search/{encoded_query}")
+        results, request_info = await _make_api_request(client, f"search/{encoded_query}")
 
         # Validate not empty for non-search terms
         _validate_response_not_empty(results, f"query '{params.query}'")
@@ -951,17 +939,12 @@ async def kanjialive_search_basic(params: KanjiBasicSearchInput) -> str:
             request_info=request_info
         )
 
-        logger.info(f"Basic search returned {metadata.results_returned} results")
+        await ctx.info(f"Basic search returned {metadata.results_returned} results")
 
-        if params.response_format == ResponseFormat.JSON:
-            return json.dumps({
-                "metadata": metadata.model_dump(),
-                "results": results
-            }, ensure_ascii=False, indent=2)
-        else:
-            return _format_search_results_markdown(results, metadata)
+        return KanjiSearchOutput(metadata=metadata, results=results)
 
     except Exception as e:
+        await ctx.error(f"Tool execution error: {type(e).__name__}")
         logger.error(
             f"Tool execution error: {type(e).__name__}",
             exc_info=True,
@@ -970,20 +953,20 @@ async def kanjialive_search_basic(params: KanjiBasicSearchInput) -> str:
                 "params": params.model_dump()
             }
         )
-        return _handle_api_error(e)
+        _handle_api_error(e)
 
 
 @mcp.tool(
     name="kanjialive_search_advanced",
+    title="Advanced Kanji Search",
     annotations={
-        "title": "Advanced Kanji Search",
         "readOnlyHint": True,
         "destructiveHint": False,
         "idempotentHint": True,
         "openWorldHint": True
     }
 )
-async def kanjialive_search_advanced(params: KanjiAdvancedSearchInput) -> str:
+async def kanjialive_search_advanced(params: KanjiAdvancedSearchInput, ctx: Context) -> KanjiSearchOutput:
     """
     Search for kanji using multiple filter criteria.
 
@@ -1008,14 +991,18 @@ async def kanjialive_search_advanced(params: KanjiAdvancedSearchInput) -> str:
 
     Args:
         params (KanjiAdvancedSearchInput): Advanced search parameters
+        ctx: MCP context for logging and accessing lifespan resources
 
     Returns:
-        str: All kanji matching criteria with metadata
+        KanjiSearchOutput: Structured search results with metadata
     """
     try:
+        # Get HTTP client from lifespan context
+        client = ctx.request_context.lifespan_context.client
+
         if not params.has_any_filter():
-            return (
-                "Error: At least one search parameter must be provided. "
+            raise ToolError(
+                "At least one search parameter must be provided. "
                 "Available parameters: on, kun, kem, ks, kanji, rjn, rem, rs, rpos, grade. "
                 "For simple searches, use kanjialive_search_basic instead."
             )
@@ -1043,14 +1030,13 @@ async def kanjialive_search_advanced(params: KanjiAdvancedSearchInput) -> str:
         if params.grade is not None:
             query_params['grade'] = params.grade
 
-        logger.info(f"Advanced search: {query_params}")
-        results, request_info = await _make_api_request("search/advanced", params=query_params)
+        await ctx.info(f"Advanced search: {query_params}")
+        results, request_info = await _make_api_request(client, "search/advanced", params=query_params)
 
+        # Ensure results is a list (empty list is valid for no matches)
         if not results:
-            return "No kanji found matching your search criteria. Try adjusting your filters."
-
-        # Ensure results is a list
-        if not isinstance(results, list):
+            results = []
+        elif not isinstance(results, list):
             results = [results]
 
         # Create metadata for this search
@@ -1060,20 +1046,18 @@ async def kanjialive_search_advanced(params: KanjiAdvancedSearchInput) -> str:
             request_info=request_info
         )
 
-        logger.info(
+        await ctx.info(
             f"Advanced search returned {metadata.results_returned} results "
             f"matching criteria {query_params}"
         )
 
-        if params.response_format == ResponseFormat.JSON:
-            return json.dumps({
-                "metadata": metadata.model_dump(),
-                "results": results
-            }, ensure_ascii=False, indent=2)
-        else:
-            return _format_search_results_markdown(results, metadata)
+        return KanjiSearchOutput(metadata=metadata, results=results)
 
+    except ToolError:
+        # Re-raise ToolError as-is (it's already properly formatted)
+        raise
     except Exception as e:
+        await ctx.error(f"Tool execution error: {type(e).__name__}")
         logger.error(
             f"Tool execution error: {type(e).__name__}",
             exc_info=True,
@@ -1082,20 +1066,20 @@ async def kanjialive_search_advanced(params: KanjiAdvancedSearchInput) -> str:
                 "params": params.model_dump()
             }
         )
-        return _handle_api_error(e)
+        _handle_api_error(e)
 
 
 @mcp.tool(
     name="kanjialive_get_kanji_details",
+    title="Get Kanji Details",
     annotations={
-        "title": "Get Kanji Details",
         "readOnlyHint": True,
         "destructiveHint": False,
         "idempotentHint": True,
         "openWorldHint": True
     }
 )
-async def kanjialive_get_kanji_details(params: KanjiDetailInput) -> str:
+async def kanjialive_get_kanji_details(params: KanjiDetailInput, ctx: Context) -> KanjiDetailOutput:
     """
     Get comprehensive information about a specific kanji character.
 
@@ -1116,12 +1100,10 @@ async def kanjialive_get_kanji_details(params: KanjiDetailInput) -> str:
     Args:
         params (KanjiDetailInput): Parameters containing:
             - character (str): The kanji character to look up
-            - response_format (str): Output format ('markdown' or 'json')
+        ctx: MCP context for logging and accessing lifespan resources
 
     Returns:
-        str: Comprehensive kanji information in the specified format. Markdown format provides
-             a well-organized, human-readable display. JSON format includes all available data
-             fields including stroke timings and media URLs.
+        KanjiDetailOutput: Comprehensive kanji information including readings, radical, examples
 
     Example usage:
         - Get details for 親: character="親"
@@ -1129,25 +1111,25 @@ async def kanjialive_get_kanji_details(params: KanjiDetailInput) -> str:
         - Get details for 日: character="日"
     """
     try:
-        logger.info(f"Get kanji details: {params.character}")
-        kanji_data, request_info = await _make_api_request(f"kanji/{params.character}")
+        # Get HTTP client from lifespan context
+        client = ctx.request_context.lifespan_context.client
+
+        await ctx.info(f"Get kanji details: {params.character}")
+        kanji_data, request_info = await _make_api_request(client, f"kanji/{params.character}")
 
         # Validate not empty
         _validate_response_not_empty(kanji_data, f"kanji '{params.character}'")
 
-        if params.response_format == ResponseFormat.JSON:
-            # Harmonize with search output structure
-            return json.dumps({
-                "metadata": {
-                    "timestamp": request_info['timestamp'],
-                    "endpoint": request_info['endpoint']
-                },
-                "kanji": kanji_data
-            }, ensure_ascii=False, indent=2)
-        else:
-            return _format_kanji_detail_markdown(kanji_data)
+        return KanjiDetailOutput(
+            metadata=KanjiDetailMetadata(
+                timestamp=request_info['timestamp'],
+                endpoint=request_info['endpoint']
+            ),
+            kanji=kanji_data
+        )
 
     except Exception as e:
+        await ctx.error(f"Tool execution error: {type(e).__name__}")
         logger.error(
             f"Tool execution error: {type(e).__name__}",
             exc_info=True,
@@ -1156,7 +1138,159 @@ async def kanjialive_get_kanji_details(params: KanjiDetailInput) -> str:
                 "params": params.model_dump()
             }
         )
-        return _handle_api_error(e)
+        _handle_api_error(e)
+
+
+# ============================================================================
+# MCP Resources
+# ============================================================================
+
+@mcp.resource("kanjialive://info/radical-positions")
+async def radical_positions_resource() -> str:
+    """
+    Reference documentation for valid radical position codes.
+
+    Use this resource to understand the valid values for the 'rpos' parameter
+    in advanced kanji searches. Radical position indicates where the radical
+    appears within the kanji character.
+    """
+    return json.dumps({
+        "description": "Valid radical position codes for the rpos parameter in advanced search",
+        "positions": {
+            "hen": {
+                "meaning": "Left side of kanji",
+                "hiragana": "へん",
+                "example": "The water radical (氵) is hen in 海 (sea)"
+            },
+            "tsukuri": {
+                "meaning": "Right side of kanji",
+                "hiragana": "つくり",
+                "example": "力 is tsukuri in 動 (move)"
+            },
+            "kanmuri": {
+                "meaning": "Top/crown of kanji",
+                "hiragana": "かんむり",
+                "example": "艹 (grass) is kanmuri in 花 (flower)"
+            },
+            "ashi": {
+                "meaning": "Bottom/legs of kanji",
+                "hiragana": "あし",
+                "example": "儿 is ashi in 見 (see)"
+            },
+            "kamae": {
+                "meaning": "Enclosure/frame of kanji",
+                "hiragana": "かまえ",
+                "example": "門 is kamae in 間 (between)"
+            },
+            "tare": {
+                "meaning": "Top-left hanging element",
+                "hiragana": "たれ",
+                "example": "广 is tare in 店 (shop)"
+            },
+            "nyou": {
+                "meaning": "Bottom-left to right element",
+                "hiragana": "にょう",
+                "example": "辶 is nyou in 道 (road)"
+            }
+        },
+        "input_formats": ["romaji (lowercase)", "hiragana"],
+        "usage_example": "Use kanjialive_search_advanced with rpos='hen' to find kanji with left-side radicals"
+    }, ensure_ascii=False, indent=2)
+
+
+@mcp.resource("kanjialive://info/search-parameters")
+async def search_parameters_resource() -> str:
+    """
+    Documentation for advanced search parameters.
+
+    Use this resource to understand all available parameters for
+    the kanjialive_search_advanced tool and how to use them effectively.
+    """
+    return json.dumps({
+        "description": "Advanced search parameters for kanjialive_search_advanced tool",
+        "parameters": {
+            "on": {
+                "description": "Onyomi (Chinese-derived) reading",
+                "format": "romaji or katakana",
+                "examples": ["shin", "シン", "ken", "ケン"],
+                "notes": "Do not mix romaji and katakana in the same query"
+            },
+            "kun": {
+                "description": "Kunyomi (native Japanese) reading",
+                "format": "romaji or hiragana",
+                "examples": ["oya", "おや", "mi.ru", "みる"],
+                "notes": "Dots indicate okurigana boundaries in romaji"
+            },
+            "kem": {
+                "description": "Kanji English meaning",
+                "format": "English word(s)",
+                "examples": ["parent", "see", "water", "fire"],
+                "notes": "Partial matches are supported"
+            },
+            "ks": {
+                "description": "Kanji stroke count",
+                "format": "integer",
+                "range": "1-30",
+                "examples": [5, 10, 16]
+            },
+            "kanji": {
+                "description": "Specific kanji character",
+                "format": "single kanji character",
+                "examples": ["親", "見", "日"],
+                "notes": "Use for exact character lookup"
+            },
+            "rjn": {
+                "description": "Radical Japanese name",
+                "format": "romaji or hiragana",
+                "examples": ["miru", "みる", "hi", "ひ"],
+                "notes": "The traditional name of the radical"
+            },
+            "rem": {
+                "description": "Radical English meaning",
+                "format": "English word",
+                "examples": ["see", "fire", "water", "person"],
+                "notes": "Useful for finding kanji by radical concept"
+            },
+            "rs": {
+                "description": "Radical stroke count",
+                "format": "integer",
+                "range": "1-17",
+                "examples": [3, 7, 4]
+            },
+            "rpos": {
+                "description": "Radical position within the kanji",
+                "format": "romaji or hiragana",
+                "values": ["hen", "tsukuri", "kanmuri", "ashi", "kamae", "tare", "nyou"],
+                "see_also": "kanjialive://info/radical-positions for detailed position descriptions"
+            },
+            "grade": {
+                "description": "Japanese school grade level where kanji is taught",
+                "format": "integer",
+                "range": "1-6",
+                "notes": "Corresponds to Japanese elementary school grades"
+            }
+        },
+        "combination_examples": [
+            {
+                "description": "Find all 5-stroke kanji taught in grade 1",
+                "parameters": {"ks": 5, "grade": 1}
+            },
+            {
+                "description": "Find kanji with the 'water' radical on the left side",
+                "parameters": {"rem": "water", "rpos": "hen"}
+            },
+            {
+                "description": "Find kanji with onyomi reading 'shin'",
+                "parameters": {"on": "shin"}
+            }
+        ],
+        "notes": [
+            "Multiple parameters can be combined for precise searches",
+            "All string parameters are case-insensitive for romaji",
+            "Database contains 1,235 kanji from Japanese elementary schools (grades 1-6)",
+            "At least one parameter must be provided for advanced search"
+        ]
+    }, ensure_ascii=False, indent=2)
 
 
 # ============================================================================

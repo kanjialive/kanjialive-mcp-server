@@ -4,8 +4,7 @@ from pydantic import ValidationError
 from kanjialive_mcp import (
     KanjiBasicSearchInput,
     KanjiAdvancedSearchInput,
-    KanjiDetailInput,
-    ResponseFormat
+    KanjiDetailInput
 )
 
 
@@ -27,10 +26,10 @@ class TestKanjiBasicSearchInput:
         with pytest.raises(ValidationError):
             KanjiBasicSearchInput(query="")
 
-    def test_default_format_markdown(self):
-        """Should default to markdown format."""
-        result = KanjiBasicSearchInput(query="\u89aa")
-        assert result.response_format == ResponseFormat.MARKDOWN
+    def test_whitespace_stripped(self):
+        """Should strip whitespace from query."""
+        result = KanjiBasicSearchInput(query="  parent  ")
+        assert result.query == "parent"
 
 
 class TestKanjiAdvancedSearchInput:

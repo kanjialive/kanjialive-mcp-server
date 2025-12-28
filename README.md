@@ -118,6 +118,11 @@ The server provides three MCP tools:
 2. **kanjialive_search_advanced** - Complex searches with multiple filters (stroke count, grade, radical, etc.)
 3. **kanjialive_get_kanji_details** - Comprehensive information for a specific kanji
 
+And two MCP resources for reference data:
+
+- `kanjialive://info/radical-positions` - Valid radical position codes
+- `kanjialive://info/search-parameters` - Advanced search parameter documentation
+
 ### Features
 
 - **Bilingual Input Support**: Accepts both romaji (English) and Japanese scripts (hiragana/katakana)
@@ -139,7 +144,7 @@ The server provides three MCP tools:
 
 ### Running Tests
 
-The project includes a comprehensive test suite with 20 tests covering validators and formatters.
+The project includes a comprehensive test suite covering validators, formatters, API layer, and tools.
 
 ```bash
 # Install development dependencies
@@ -158,10 +163,12 @@ pytest tests/test_formatters.py -v
 
 ### Test Coverage
 
-Current test coverage: **49%** (20 passing tests)
+Current test coverage: **82%** (64 tests)
 
-- Validator tests: Input validation, Unicode normalization, field validators
-- Formatter tests: Markdown escaping, result formatting, metadata creation
+- Validators: Input validation, Unicode normalization, field validators
+- Formatters: Markdown escaping, result formatting, metadata creation
+- API layer: Retry logic, error handling, response validation
+- Tools: End-to-end tool execution with mocked MCP context
 
 ## API Documentation
 
