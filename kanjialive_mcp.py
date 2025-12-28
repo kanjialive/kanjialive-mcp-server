@@ -27,6 +27,7 @@ import unicodedata
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from urllib.parse import quote
 
@@ -48,6 +49,44 @@ USER_AGENT = "kanjialive-mcp/1.0 (+https://github.com/kanjialive-mcp-server)"
 
 # Logger (configured in main)
 logger = logging.getLogger(__name__)
+
+# Data directory for bundled reference data
+DATA_DIR = Path(__file__).parent / "data"
+
+# Cached radicals data (loaded once on first access)
+_RADICALS_CACHE: Optional[Dict[str, Any]] = None
+
+
+def _load_radicals_data() -> Dict[str, Any]:
+    """
+    Load the Japanese radicals reference data from bundled JSON.
+
+    The data is cached after first load to avoid repeated file I/O.
+
+    Returns:
+        Dict containing radicals data with metadata and radical entries
+
+    Raises:
+        FileNotFoundError: If the radicals JSON file is missing
+    """
+    global _RADICALS_CACHE
+
+    if _RADICALS_CACHE is not None:
+        return _RADICALS_CACHE
+
+    radicals_file = DATA_DIR / "japanese-radicals.json"
+
+    if not radicals_file.exists():
+        raise FileNotFoundError(
+            f"Radicals data file not found: {radicals_file}. "
+            f"Run 'python scripts/convert_radicals_csv.py' to generate it."
+        )
+
+    with open(radicals_file, 'r', encoding='utf-8') as f:
+        _RADICALS_CACHE = json.load(f)
+
+    logger.debug(f"Loaded {_RADICALS_CACHE.get('total_entries', 0)} radicals from {radicals_file}")
+    return _RADICALS_CACHE
 
 
 # ============================================================================
@@ -1366,6 +1405,45 @@ async def search_parameters_resource() -> str:
             "At least one parameter must be provided for advanced search"
         ]
     }, ensure_ascii=False, indent=2)
+
+
+@mcp.resource("kanjialive://info/radicals")
+async def radicals_resource() -> str:
+    """
+    Complete reference of the 214 traditional Kangxi radicals with position variants.
+
+    This resource provides comprehensive data on all 321 radical entries:
+    - 214 original Kangxi radicals from the 1716 dictionary
+    - 107 position variants (forms that change based on placement in kanji)
+    - 51 radicals marked as important for beginning learners
+
+    Each radical entry includes:
+    - Character, meaning, stroke count
+    - Japanese and romaji readings
+    - Position information (hen, tsukuri, kanmuri, etc.)
+    - Origin (kangxi or variant)
+    - For variants: reference to the base radical
+
+    Note: 60 position variants use Private Use Area (PUA) Unicode encoding
+    (U+E700–U+E759, U+E766–U+E767) and require the Kanji Alive radicals font
+    to display correctly. These entries include a 'fallback_display' field
+    for readability without the font. See the font_requirement field in the
+    response for download links and visual reference.
+
+    Use this resource to:
+    - Look up radical meanings and readings
+    - Understand radical position terminology
+    - Find the base radical for position variants
+    - Identify important radicals for study prioritization
+    """
+    try:
+        radicals_data = _load_radicals_data()
+        return json.dumps(radicals_data, ensure_ascii=False, indent=2)
+    except FileNotFoundError as e:
+        return json.dumps({
+            "error": str(e),
+            "hint": "The radicals data file needs to be generated from the source CSV."
+        }, ensure_ascii=False, indent=2)
 
 
 # ============================================================================
