@@ -16,6 +16,7 @@ This MCP server enables you to search and retrieve detailed information about 1,
 ## Prerequisites
 
 - Python 3.10 or higher
+- [uv](https://docs.astral.sh/uv/) package manager
 - A RapidAPI key (free tier available)
 - Claude Desktop application (recommended)
 
@@ -28,21 +29,13 @@ This MCP server enables you to search and retrieve detailed information about 1,
 3. Subscribe to the free tier
 4. Copy your API key
 
-### 2. Set Up Python Environment
+### 2. Install Dependencies
 
 ```bash
-# Create a virtual environment
-python3 -m venv venv
-
-# Activate the virtual environment
-# On macOS/Linux:
-source venv/bin/activate
-# On Windows:
-venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+uv sync
 ```
+
+This creates a `.venv` virtual environment and installs all dependencies from the lock file.
 
 ### 3. Configure API Key
 
@@ -73,8 +66,8 @@ Add the server to your Claude Desktop configuration file:
 {
   "mcpServers": {
     "kanjialive": {
-      "command": "/path/to/ka-mcp/venv/bin/python",
-      "args": ["/path/to/ka-mcp/kanjialive_mcp.py"],
+      "command": "/path/to/kanjialive-mcp-server/.venv/bin/python",
+      "args": ["/path/to/kanjialive-mcp-server/kanjialive_mcp.py"],
       "env": {
         "RAPIDAPI_KEY": "your_api_key_here"
       }
@@ -83,7 +76,7 @@ Add the server to your Claude Desktop configuration file:
 }
 ```
 
-Replace `/path/to/ka-mcp` with the actual path to this directory. You can also set your RapidAPI key as an environment variable here.
+Replace `/path/to/kanjialive-mcp-server` with the actual path to this directory.
 
 ### 5. Restart Claude Desktop
 
@@ -147,23 +140,19 @@ And two MCP resources for reference data:
 The project includes a comprehensive test suite covering validators, formatters, API layer, and tools.
 
 ```bash
-# Install development dependencies
-pip install -r requirements-dev.txt
+# Install with dev dependencies
+uv sync --all-extras
 
 # Run all tests
-pytest tests/ -v
-
-# Run tests with coverage report
-pytest tests/ -v --cov=kanjialive_mcp --cov-report=term-missing
+uv run pytest tests/ -v
 
 # Run specific test files
-pytest tests/test_validators.py -v
-pytest tests/test_formatters.py -v
+uv run pytest tests/test_validators.py -v
 ```
 
 ### Test Coverage
 
-Current test coverage: **82%** (64 tests)
+Current test coverage: **83%** (64 tests)
 
 - Validators: Input validation, Unicode normalization, field validators
 - Formatters: Markdown escaping, result formatting, metadata creation
