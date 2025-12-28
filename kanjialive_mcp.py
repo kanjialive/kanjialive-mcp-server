@@ -791,8 +791,9 @@ def _format_kanji_detail_markdown(kanji: Dict[str, Any]) -> str:
     char = kanji.get('kanji', {}).get('character', '?')
     k_info = kanji.get('kanji', {})
     meaning = k_info.get('meaning', {}).get('english', 'N/A')
-    # Detail API uses 'strokes' (plural) as direct integer
-    strokes = k_info.get('strokes', 'N/A')
+    # Detail API uses 'strokes' as object with 'count', 'timings', 'images'
+    strokes_obj = k_info.get('strokes', {})
+    strokes = strokes_obj.get('count', 'N/A') if isinstance(strokes_obj, dict) else strokes_obj
     # Grade is in references object, not directly on kanji
     refs = kanji.get('references', {})
     grade = refs.get('grade', None)

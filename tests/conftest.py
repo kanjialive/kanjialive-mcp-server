@@ -27,7 +27,7 @@ def mock_api_response():
         "kanji": {
             "character": "\u89aa",
             "meaning": {"english": "parent"},
-            "strokes": 16,  # Direct integer, not {"count": 16}
+            "strokes": {"count": 16, "timings": [], "images": []},  # Object with count
             "onyomi": {
                 "katakana": "\u30b7\u30f3",  # String, not array
                 "romaji": "shin"  # String, not array
