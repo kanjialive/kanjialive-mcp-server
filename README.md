@@ -187,7 +187,7 @@ Current test coverage: **83%** (64 tests)
 
 ## Credit
 
-Initially vibe coded with Claude using the [mcp-builder skill](https://github.com/anthropics/skills). Subsequent revisions drawn from GPT-5 and Claude Sonnet 4.5 code reviews, selectively implemented in Claude Code. MCP 2025-11-25 spec compliance (lifespan context, structured output, ToolError handling) and uv migration by Claude Opus 4.5.
+Arno Bosse and Claude Code.
 
 ## License
 
