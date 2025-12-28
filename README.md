@@ -9,9 +9,9 @@ This MCP server enables you to search and retrieve detailed information about 1,
 - Kanji meanings, readings (Onyomi/Kunyomi), and stroke counts
 - Radical information and positions
 - Grade levels where kanji are taught
-- Example words with translations
+- Example words with translations and audio (mp3)
+- Stroke order animation videos (mp4)
 - Dictionary references
-- Stroke order data
 
 ## Prerequisites
 
@@ -118,6 +118,7 @@ Once configured, you can ask your LLM to search for kanji information:
 - "Find all 5-stroke kanji taught in grade 1"
 - "Show me kanji using the 'fire' radical"
 - "Find grade 2 kanji with the radical position 'hen'"
+- "Search for kanji in the Macquarie University or AP Exam study lists"
 
 ### Detailed Information
 
@@ -129,8 +130,8 @@ Once configured, you can ask your LLM to search for kanji information:
 The server provides three MCP tools:
 
 1. **kanjialive_search_basic** - Simple search by kanji, reading, or meaning
-2. **kanjialive_search_advanced** - Complex searches with multiple filters (stroke count, grade, radical, etc.)
-3. **kanjialive_get_kanji_details** - Comprehensive information for a specific kanji
+2. **kanjialive_search_advanced** - Complex searches with multiple filters (stroke count, grade, radical, study list, etc.)
+3. **kanjialive_get_kanji_details** - Comprehensive information for a specific kanji including stroke order video and example audio
 
 And two (draft) MCP resources for reference data:
 
@@ -173,7 +174,7 @@ uv run pytest tests/test_validators.py -v
 
 ### Test Coverage
 
-Current test coverage: **83%** (64 tests)
+Current test coverage: **87%** (67 tests)
 
 - Validators: Input validation, Unicode normalization, field validators
 - Formatters: Markdown escaping, result formatting, metadata creation
