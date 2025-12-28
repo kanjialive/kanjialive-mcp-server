@@ -58,3 +58,4 @@ htmlcov/
 # Development notes
 TODO.md
 ka-api.txt
+.env
