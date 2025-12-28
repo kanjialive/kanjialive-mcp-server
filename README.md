@@ -78,7 +78,7 @@ Add the server to your configuration file:
 ```json
 {
   "mcpServers": {
-    "kanjialive": {
+    "Kanji Alive": {
       "command": "/path/to/kanjialive-mcp-server/.venv/bin/python",
       "args": ["/path/to/kanjialive-mcp-server/kanjialive_mcp.py"],
       "env": {
