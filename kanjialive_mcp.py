@@ -1183,6 +1183,85 @@ async def kanjialive_search_advanced(params: KanjiAdvancedSearchInput, ctx: Cont
         _handle_api_error(e)
 
 
+def _filter_kanji_detail_response(raw_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Filter raw API response to match the documented Kanji Alive API format.
+
+    The Kanji Alive API returns both raw database fields and a clean nested structure.
+    This function extracts only the documented fields to avoid exposing:
+    - Internal database fields (_id, _rev, *_search indices)
+    - Licensing-restricted data (textbook chapters, mnemonic hints)
+    - Redundant/duplicate data
+
+    The documented response format includes only:
+    - kanji: character, meaning, strokes (int), onyomi, kunyomi, video
+    - radical: character, strokes, image, position, name, meaning, animation
+    - references: grade, kodansha, classic_nelson
+    - examples: japanese, meaning, audio
+
+    Args:
+        raw_data: Raw API response from Kanji Alive
+
+    Returns:
+        Filtered dictionary matching the documented API format
+    """
+    filtered = {}
+
+    # Extract and filter the 'kanji' object to documented fields only
+    if 'kanji' in raw_data and isinstance(raw_data['kanji'], dict):
+        kanji_raw = raw_data['kanji']
+        kanji_filtered = {}
+
+        if 'character' in kanji_raw:
+            kanji_filtered['character'] = kanji_raw['character']
+        if 'meaning' in kanji_raw:
+            kanji_filtered['meaning'] = kanji_raw['meaning']
+
+        # strokes: API returns object {count, timings, images}, docs show integer
+        if 'strokes' in kanji_raw:
+            strokes = kanji_raw['strokes']
+            if isinstance(strokes, dict):
+                kanji_filtered['strokes'] = strokes.get('count', 0)
+            else:
+                kanji_filtered['strokes'] = strokes
+
+        if 'onyomi' in kanji_raw:
+            kanji_filtered['onyomi'] = kanji_raw['onyomi']
+        if 'kunyomi' in kanji_raw:
+            kanji_filtered['kunyomi'] = kanji_raw['kunyomi']
+        if 'video' in kanji_raw:
+            kanji_filtered['video'] = kanji_raw['video']
+
+        filtered['kanji'] = kanji_filtered
+
+    # Extract the 'radical' object (already matches documented format)
+    if 'radical' in raw_data and isinstance(raw_data['radical'], dict):
+        filtered['radical'] = raw_data['radical']
+
+    # Extract references
+    if 'references' in raw_data and isinstance(raw_data['references'], dict):
+        filtered['references'] = raw_data['references']
+
+    # Extract examples array with only documented fields
+    if 'examples' in raw_data and isinstance(raw_data['examples'], list):
+        filtered_examples = []
+        for example in raw_data['examples']:
+            if isinstance(example, dict):
+                filtered_example = {}
+                if 'japanese' in example:
+                    filtered_example['japanese'] = example['japanese']
+                if 'meaning' in example:
+                    filtered_example['meaning'] = example['meaning']
+                if 'audio' in example:
+                    filtered_example['audio'] = example['audio']
+                if filtered_example:
+                    filtered_examples.append(filtered_example)
+        if filtered_examples:
+            filtered['examples'] = filtered_examples
+
+    return filtered
+
+
 @mcp.tool(
     name="kanjialive_get_kanji_details",
     title="Get Kanji Details",
@@ -1229,10 +1308,13 @@ async def kanjialive_get_kanji_details(params: KanjiDetailInput, ctx: Context) -
         client = ctx.request_context.lifespan_context.client
 
         await ctx.info(f"Get kanji details: {params.character}")
-        kanji_data, request_info = await _make_api_request(client, f"kanji/{params.character}")
+        raw_data, request_info = await _make_api_request(client, f"kanji/{params.character}")
 
         # Validate not empty
-        _validate_response_not_empty(kanji_data, f"kanji '{params.character}'")
+        _validate_response_not_empty(raw_data, f"kanji '{params.character}'")
+
+        # Filter to documented fields only (removes internal DB fields, restricted data)
+        kanji_data = _filter_kanji_detail_response(raw_data)
 
         return KanjiDetailOutput(
             metadata=KanjiDetailMetadata(
