@@ -28,11 +28,24 @@ def test_format_search_results_empty():
 
 
 def test_format_search_results_single(mock_search_results):
-    """Should format single result correctly."""
+    """Should format single result correctly.
+
+    Note: Search API returns minimal data - only character, stroke, radical.
+    Meaning, grade, and readings are only available in detail endpoint.
+    """
     output = _format_search_results_markdown(mock_search_results)
-    assert "parent" in output
+    # Check for kanji character (親 = \u89aa)
+    assert "\u89aa" in output or "親" in output
+    # Check stroke count is displayed
     assert "16" in output
+    # Check table header exists
     assert "| Kanji |" in output
+    # Check radical stroke count
+    assert "7" in output
+    # Check radical order (index in 214 traditional radicals) is displayed
+    assert "147" in output
+    # Check table header includes radical order column
+    assert "Rad. #" in output
 
 
 def test_format_kanji_detail_complete(mock_api_response):
@@ -42,6 +55,12 @@ def test_format_kanji_detail_complete(mock_api_response):
     assert "Onyomi" in output
     assert "Kunyomi" in output
     assert "Radical" in output
+    # Check for stroke order video (mp4)
+    assert "Stroke Order Video" in output
+    assert ".mp4" in output
+    # Check for example word with mp3 audio
+    assert "Example Words" in output
+    assert ".mp3" in output
 
 
 def test_extract_fields_from_results(mock_search_results):

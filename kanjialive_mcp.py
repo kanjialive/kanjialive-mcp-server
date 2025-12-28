@@ -189,8 +189,8 @@ class KanjiBasicSearchInput(BaseModel):
         ...,
         description=(
             "Search term: a single kanji character (親), "
-            "an Onyomi reading in katakana (シン), "
-            "a Kunyomi reading in hiragana (おや), "
+            "an Onyomi (on) reading in katakana (シン), "
+            "a Kunyomi (kun) reading in hiragana (おや), "
             "or an English meaning (parent)"
         ),
         min_length=1,
@@ -215,11 +215,11 @@ class KanjiAdvancedSearchInput(BaseModel):
 
     on: Optional[str] = Field(
         default=None,
-        description="Onyomi reading in romaji or katakana (shin, シン)"
+        description="Onyomi (on) reading in romaji or katakana (shin, シン)"
     )
     kun: Optional[str] = Field(
         default=None,
-        description="Kunyomi reading in romaji or hiragana (oya, おや)"
+        description="Kunyomi (kun) reading in romaji or hiragana (oya, おや)"
     )
     kem: Optional[str] = Field(
         default=None,
@@ -227,7 +227,7 @@ class KanjiAdvancedSearchInput(BaseModel):
     )
     ks: Optional[int] = Field(
         default=None,
-        description="Kanji stroke number (1-30)",
+        description="Kanji stroke number (1-22)",
         ge=1,
         le=30
     )
@@ -247,7 +247,7 @@ class KanjiAdvancedSearchInput(BaseModel):
     )
     rs: Optional[int] = Field(
         default=None,
-        description="Radical stroke number (1-17)",
+        description="Radical stroke number (1-14)",
         ge=1,
         le=17
     )
@@ -261,6 +261,55 @@ class KanjiAdvancedSearchInput(BaseModel):
         ge=1,
         le=6
     )
+    list: Optional[str] = Field(
+        default=None,
+        description=(
+            "Study list to search within. "
+            "Values: 'ap' (Advanced Placement Exam), 'mac' (Macquarie University). "
+            "Can include chapter: 'ap:c3' for AP chapter 3, 'mac:c12' for Macquarie chapter 12."
+        )
+    )
+
+    @field_validator('list')
+    @classmethod
+    def validate_study_list(cls, v: Optional[str]) -> Optional[str]:
+        """Validate study list format."""
+        if v is None:
+            return v
+
+        v = v.strip().lower()
+
+        # Valid base lists
+        valid_lists = {'ap', 'mac'}
+
+        # Check for base list or list:chapter format
+        if ':' in v:
+            parts = v.split(':')
+            if len(parts) != 2:
+                raise ValueError(
+                    f"Invalid study list format '{v}'. "
+                    f"Use 'ap', 'mac', 'ap:c3', or 'mac:c12'."
+                )
+            base_list, chapter = parts
+            if base_list not in valid_lists:
+                raise ValueError(
+                    f"Invalid study list '{base_list}'. "
+                    f"Valid lists: 'ap' (Advanced Placement), 'mac' (Macquarie)."
+                )
+            # Validate chapter format (should be 'c' followed by number)
+            if not re.match(r'^c\d+$', chapter):
+                raise ValueError(
+                    f"Invalid chapter format '{chapter}'. "
+                    f"Use format 'c1', 'c2', 'c12', etc."
+                )
+        else:
+            if v not in valid_lists:
+                raise ValueError(
+                    f"Invalid study list '{v}'. "
+                    f"Valid lists: 'ap' (Advanced Placement), 'mac' (Macquarie)."
+                )
+
+        return v
 
     @field_validator('on')
     @classmethod
@@ -347,7 +396,7 @@ class KanjiAdvancedSearchInput(BaseModel):
         """Check if any search filter is provided."""
         return any([
             self.on, self.kun, self.kem, self.ks, self.kanji,
-            self.rjn, self.rem, self.rs, self.rpos, self.grade
+            self.rjn, self.rem, self.rs, self.rpos, self.grade, self.list
         ])
 
 
@@ -638,7 +687,7 @@ def _handle_api_error(e: Exception) -> None:
             raise ToolError(
                 "Resource not found. The kanji may not be in the database, "
                 "or the search parameters didn't match any results. "
-                "Kanji Alive supports 1,235 kanji taught in Japanese elementary schools."
+                "Kanji Alive supports 1,235 kanji comprising those taught in Japanese elementary schools up to Grade 6 and those taught up to the level of N2 of the Japanese Language Proficiency Test conducted by the Japan Foundation."
             )
         elif e.response.status_code == 400:
             raise ToolError(
@@ -705,29 +754,24 @@ def _format_search_results_markdown(
         )
     
     # Main results table
-    output += "| Kanji | Meaning | Strokes | Grade | Radical | Radical Strokes |\n"
-    output += "|-------|---------|---------|-------|---------|------------------|\n"
-    
+    # Note: Search API returns minimal data - only character, stroke count, and radical info
+    # Meaning, grade, and readings are only available via the detail endpoint
+    output += "| Kanji | Strokes | Radical | Rad. Strokes | Rad. # |\n"
+    output += "|-------|---------|---------|--------------|--------|\n"
+
     for kanji in results:
         char = kanji.get('kanji', {}).get('character', '?')
-        meaning = kanji.get('kanji', {}).get('meaning', {}).get('english', 'N/A')
-        strokes = kanji.get('kanji', {}).get('strokes', {}).get('count', 'N/A')
-        grade = kanji.get('kanji', {}).get('grade', 'N/A')
+        # Search API uses 'stroke' (singular) as direct integer
+        strokes = kanji.get('kanji', {}).get('stroke', 'N/A')
 
-        # Get readings
-        onyomi_list = kanji.get('kanji', {}).get('onyomi', {}).get('katakana', [])
-        kunyomi_list = kanji.get('kanji', {}).get('kunyomi', {}).get('hiragana', [])
-
-        onyomi = ', '.join(onyomi_list) if onyomi_list else 'None'
-        kunyomi = ', '.join(kunyomi_list) if kunyomi_list else 'None'
-
-        # Get radical info
+        # Get radical info - search API uses 'stroke' (singular)
         radical = kanji.get('radical', {})
         radical_char = radical.get('character', 'N/A')
-        radical_strokes = radical.get('strokes', 'N/A')
+        radical_strokes = radical.get('stroke', 'N/A')
+        # Radical order is the index in the 214 traditional kanji radicals
+        radical_order = radical.get('order', 'N/A')
 
-        # Escape dynamic content for Markdown safety
-        output += f"| {char} | {_escape_markdown(meaning)} | {strokes} | {grade} | {radical_char} | {radical_strokes} |\n"
+        output += f"| {char} | {strokes} | {radical_char} | {radical_strokes} | {radical_order} |\n"
 
     output += f"\n**Total Results Shown:** {len(results)}\n"
 
@@ -747,8 +791,11 @@ def _format_kanji_detail_markdown(kanji: Dict[str, Any]) -> str:
     char = kanji.get('kanji', {}).get('character', '?')
     k_info = kanji.get('kanji', {})
     meaning = k_info.get('meaning', {}).get('english', 'N/A')
-    strokes = k_info.get('strokes', {}).get('count', 'N/A')
-    grade = k_info.get('grade', 'N/A')
+    # Detail API uses 'strokes' (plural) as direct integer
+    strokes = k_info.get('strokes', 'N/A')
+    # Grade is in references object, not directly on kanji
+    refs = kanji.get('references', {})
+    grade = refs.get('grade', None)
 
     output = f"# {char} - Kanji Details\n\n"
     output += f"**Meaning:** {_escape_markdown(meaning)}\n\n"
@@ -756,29 +803,53 @@ def _format_kanji_detail_markdown(kanji: Dict[str, Any]) -> str:
     # Basic info
     output += "## Basic Information\n\n"
     output += f"- **Strokes:** {strokes}\n"
-    output += f"- **Grade:** {grade if grade else 'Not taught in elementary school'}\n\n"
+    output += f"- **Grade:** {grade if grade else 'Not taught in elementary school'}\n"
 
-    # Readings
+    # Stroke order video (mp4)
+    video = k_info.get('video', {})
+    video_mp4 = video.get('mp4', '')
+    if video_mp4:
+        output += f"- **Stroke Order Video:** <{video_mp4}>\n"
+    output += "\n"
+
+    # Readings - API returns comma-separated strings, not arrays
     output += "## Readings\n\n"
 
     onyomi = k_info.get('onyomi', {})
     if onyomi:
-        onyomi_kata = onyomi.get('katakana', [])
-        onyomi_roma = onyomi.get('romaji', [])
+        # API returns strings like "ホウ" or "otozureru, tazuneru"
+        onyomi_kata = onyomi.get('katakana', '')
+        onyomi_roma = onyomi.get('romaji', '')
         if onyomi_kata:
             output += "**Onyomi (音読み):**\n"
-            for kata, roma in zip(onyomi_kata, onyomi_roma):
-                output += f"- {kata} ({roma})\n"
+            # Split comma-separated readings and pair them
+            kata_parts = [k.strip() for k in onyomi_kata.split(',') if k.strip()]
+            roma_parts = [r.strip() for r in onyomi_roma.split(',') if r.strip()]
+            # Zip with fallback for mismatched lengths
+            for i, kata in enumerate(kata_parts):
+                roma = roma_parts[i] if i < len(roma_parts) else ''
+                if roma:
+                    output += f"- {kata} ({roma})\n"
+                else:
+                    output += f"- {kata}\n"
             output += "\n"
 
     kunyomi = k_info.get('kunyomi', {})
     if kunyomi:
-        kunyomi_hira = kunyomi.get('hiragana', [])
-        kunyomi_roma = kunyomi.get('romaji', [])
+        # API returns strings with Japanese comma (、) separation
+        kunyomi_hira = kunyomi.get('hiragana', '')
+        kunyomi_roma = kunyomi.get('romaji', '')
         if kunyomi_hira:
             output += "**Kunyomi (訓読み):**\n"
-            for hira, roma in zip(kunyomi_hira, kunyomi_roma):
-                output += f"- {hira} ({roma})\n"
+            # Split on Japanese comma (、) or regular comma
+            hira_parts = [h.strip() for h in kunyomi_hira.replace('、', ',').split(',') if h.strip()]
+            roma_parts = [r.strip() for r in kunyomi_roma.split(',') if r.strip()]
+            for i, hira in enumerate(hira_parts):
+                roma = roma_parts[i] if i < len(roma_parts) else ''
+                if roma:
+                    output += f"- {hira} ({roma})\n"
+                else:
+                    output += f"- {hira}\n"
             output += "\n"
 
     # Radical
@@ -800,8 +871,7 @@ def _format_kanji_detail_markdown(kanji: Dict[str, Any]) -> str:
             output += f"- **Position:** {rad_position}\n"
         output += "\n"
 
-    # Dictionary references
-    refs = kanji.get('references', {})
+    # Dictionary references (refs already fetched above for grade)
     if refs:
         output += "## Dictionary References\n\n"
         if refs.get('kodansha'):
@@ -818,7 +888,8 @@ def _format_kanji_detail_markdown(kanji: Dict[str, Any]) -> str:
             japanese = ex.get('japanese', '')
             meaning_en = ex.get('meaning', {}).get('english', '')
             audio = ex.get('audio', {})
-            audio_url = audio.get('opus', '') or audio.get('aac', '') or audio.get('ogg', '')
+            # Use mp3 format only for audio
+            audio_url = audio.get('mp3', '')
 
             output += f"### {_escape_markdown(japanese)}\n"
             output += f"**Meaning:** {_escape_markdown(meaning_en)}\n"
@@ -972,7 +1043,7 @@ async def kanjialive_search_advanced(params: KanjiAdvancedSearchInput, ctx: Cont
 
     This tool provides advanced search capabilities with multiple filter options that can be
     combined to narrow down results. You can search by kanji properties, readings, meanings,
-    radical characteristics, stroke counts, and grade levels.
+    radical characteristics, stroke counts, grade levels, and study lists.
 
     Available search parameters:
     - on: Onyomi reading (romaji or katakana) - e.g., "shin" or "シン"
@@ -985,6 +1056,7 @@ async def kanjialive_search_advanced(params: KanjiAdvancedSearchInput, ctx: Cont
     - rs: Radical stroke number (1-17) - e.g., 3, 7
     - rpos: Radical position - hen, tsukuri, kanmuri, ashi, kamae, tare, nyou
     - grade: School grade level (1-6) where kanji is taught
+    - list: Study list - "ap" (Advanced Placement), "mac" (Macquarie), or with chapter "ap:c3"
 
     Multiple parameters can be combined for precise searches. For example, you can search for
     all 5-stroke kanji that are taught in grade 1, or all kanji using a specific radical.
@@ -1003,7 +1075,7 @@ async def kanjialive_search_advanced(params: KanjiAdvancedSearchInput, ctx: Cont
         if not params.has_any_filter():
             raise ToolError(
                 "At least one search parameter must be provided. "
-                "Available parameters: on, kun, kem, ks, kanji, rjn, rem, rs, rpos, grade. "
+                "Available parameters: on, kun, kem, ks, kanji, rjn, rem, rs, rpos, grade, list. "
                 "For simple searches, use kanjialive_search_basic instead."
             )
 
@@ -1029,6 +1101,8 @@ async def kanjialive_search_advanced(params: KanjiAdvancedSearchInput, ctx: Cont
             query_params['rpos'] = params.rpos
         if params.grade is not None:
             query_params['grade'] = params.grade
+        if params.list:
+            query_params['list'] = params.list
 
         await ctx.info(f"Advanced search: {query_params}")
         results, request_info = await _make_api_request(client, "search/advanced", params=query_params)

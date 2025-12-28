@@ -75,6 +75,40 @@ class TestKanjiAdvancedSearchInput:
         with_filter = KanjiAdvancedSearchInput(grade=2)
         assert with_filter.has_any_filter()
 
+    def test_study_list_validation(self):
+        """Should validate study list format."""
+        # Valid base lists
+        valid_ap = KanjiAdvancedSearchInput(list="ap")
+        assert valid_ap.list == "ap"
+
+        valid_mac = KanjiAdvancedSearchInput(list="MAC")  # Should normalize to lowercase
+        assert valid_mac.list == "mac"
+
+        # Valid list with chapter
+        valid_ap_chapter = KanjiAdvancedSearchInput(list="ap:c3")
+        assert valid_ap_chapter.list == "ap:c3"
+
+        valid_mac_chapter = KanjiAdvancedSearchInput(list="mac:c12")
+        assert valid_mac_chapter.list == "mac:c12"
+
+    def test_study_list_invalid_values(self):
+        """Should reject invalid study list values."""
+        # Invalid base list
+        with pytest.raises(ValidationError):
+            KanjiAdvancedSearchInput(list="invalid")
+
+        # Invalid chapter format
+        with pytest.raises(ValidationError):
+            KanjiAdvancedSearchInput(list="ap:chapter3")  # Should be 'c3'
+
+        with pytest.raises(ValidationError):
+            KanjiAdvancedSearchInput(list="ap:3")  # Missing 'c' prefix
+
+    def test_study_list_in_has_any_filter(self):
+        """Study list should be recognized as a valid filter."""
+        with_list = KanjiAdvancedSearchInput(list="ap")
+        assert with_list.has_any_filter()
+
 
 class TestKanjiDetailInput:
     """Test kanji detail input validation."""
