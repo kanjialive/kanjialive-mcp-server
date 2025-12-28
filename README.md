@@ -29,7 +29,14 @@ This MCP server enables you to search and retrieve detailed information about 1,
 3. Subscribe to the free tier
 4. Copy your API key
 
-### 2. Install Dependencies
+### 2. Clone the Repository
+
+```bash
+git clone https://github.com/BoQsc/kanjialive-mcp-server.git
+cd kanjialive-mcp-server
+```
+
+### 3. Install Dependencies
 
 ```bash
 uv sync
@@ -37,7 +44,7 @@ uv sync
 
 This creates a `.venv` virtual environment and installs all dependencies from the lock file.
 
-### 3. Configure API Key
+### 4. Configure API Key
 
 **Important:** The server validates the API key on startup and will fail immediately if not configured properly.
 
@@ -54,7 +61,7 @@ set RAPIDAPI_KEY=your_api_key_here
 $env:RAPIDAPI_KEY="your_api_key_here"
 ```
 
-### 4. Configure Claude Desktop
+### 5. Configure Claude Desktop
 
 Add the server to your Claude Desktop configuration file:
 
@@ -78,7 +85,7 @@ Add the server to your Claude Desktop configuration file:
 
 Replace `/path/to/kanjialive-mcp-server` with the actual path to this directory.
 
-### 5. Restart Claude Desktop
+### 6. Restart Claude Desktop
 
 After updating the configuration, restart Claude Desktop for changes to take effect.
 
@@ -166,7 +173,7 @@ Current test coverage: **83%** (64 tests)
 
 ## Credit
 
-Initially vibe coded with Claude using the [mcp-builder skill](https://github.com/anthropics/skills). Subsequent revisions drawn from GPT-5 and Claude Sonnet 4.5 code reviews, selectively implemented in Claude Code.
+Initially vibe coded with Claude using the [mcp-builder skill](https://github.com/anthropics/skills). Subsequent revisions drawn from GPT-5 and Claude Sonnet 4.5 code reviews, selectively implemented in Claude Code. MCP 2025-11-25 spec compliance (lifespan context, structured output, ToolError handling) and uv migration by Claude Opus 4.5.
 
 ## License
 
