@@ -46,19 +46,10 @@ ENV/
 # Logs
 *.log
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-
 # Distribution
 *.tar.gz
 *.zip
 
-# Development notes
-TODO.md
-ka-api.txt
-.env
-
-# Source data files (converted to JSON for distribution)
-all-radicals.csv
+# Development files
+extras/
+CLAUDE.md
