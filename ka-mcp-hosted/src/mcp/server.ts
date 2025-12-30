@@ -5,6 +5,9 @@
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { executeBasicSearch } from './tools/basicSearch.js';
 import { executeAdvancedSearch } from './tools/advancedSearch.js';
 import { executeKanjiDetails } from './tools/kanjiDetails.js';
@@ -30,6 +33,12 @@ import {
 } from './resources/radicals.js';
 import { logger } from '../utils/logger.js';
 
+// Load version from package.json to avoid duplication
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const packageJson = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf-8'));
+const VERSION: string = packageJson.version;
+
 /**
  * Create and configure the MCP server.
  *
@@ -38,7 +47,7 @@ import { logger } from '../utils/logger.js';
 export function createMCPServer(): McpServer {
   const server = new McpServer({
     name: 'Kanji Alive',
-    version: '1.1.1',
+    version: VERSION,
   });
 
   // Register tools

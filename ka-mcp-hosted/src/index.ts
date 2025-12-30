@@ -13,9 +13,46 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { EventEmitter } from 'node:events';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { createMCPServer } from './mcp/server.js';
 import { logger } from './utils/logger.js';
 import { getApiHeaders } from './api/client.js';
+
+// Load version from package.json to avoid duplication
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const packageJson = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf-8'));
+const VERSION: string = packageJson.version;
+
+/**
+ * Validate session ID format.
+ * Accepts UUID v4 format to prevent log injection and DoS via large values.
+ */
+function isValidSessionId(id: string | undefined): id is string {
+  if (!id || id.length > 100) return false;
+  // UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+}
+
+/**
+ * Minimal interface for MCP SDK's handleRequest method.
+ * This is a subset of IncomingMessage that the SDK actually uses.
+ */
+type MockIncomingMessage = Readable & {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  rawHeaders: string[];
+  httpVersion: string;
+  httpVersionMajor: number;
+  httpVersionMinor: number;
+  complete: boolean;
+  socket: { remoteAddress: string; remotePort: number };
+  connection: null;
+};
 
 /**
  * Create a mock Node.js IncomingMessage from Hono request context.
@@ -25,7 +62,7 @@ function createMockRequest(
   path: string,
   headers: Record<string, string>,
   _body?: unknown
-): unknown {
+): MockIncomingMessage {
   const rawHeaders: string[] = [];
   for (const [key, value] of Object.entries(headers)) {
     rawHeaders.push(key, value);
@@ -39,7 +76,7 @@ function createMockRequest(
   });
 
   // Extend stream with IncomingMessage properties
-  const mockReq = Object.assign(stream, {
+  const mockReq: MockIncomingMessage = Object.assign(stream, {
     method,
     url: path,
     headers,
@@ -59,10 +96,36 @@ function createMockRequest(
 }
 
 /**
+ * Minimal interface for MCP SDK's handleRequest method.
+ * This is a subset of ServerResponse that the SDK actually uses.
+ */
+type MockServerResponse = EventEmitter & {
+  statusCode: number;
+  statusMessage: string;
+  headersSent: boolean;
+  finished: boolean;
+  writable: boolean;
+  writeHead: (status: number, statusMessage?: string | Record<string, string>, headers?: Record<string, string>) => MockServerResponse;
+  write: (chunk: string | Buffer | Uint8Array) => boolean;
+  end: (data?: string | Buffer | Uint8Array | (() => void), encoding?: BufferEncoding | (() => void), callback?: () => void) => MockServerResponse;
+  setHeader: (name: string, value: string | string[]) => void;
+  getHeader: (name: string) => string | string[] | undefined;
+  getHeaders: () => Record<string, string | string[]>;
+  hasHeader: (name: string) => boolean;
+  removeHeader: (name: string) => void;
+  writeContinue: () => void;
+  setTimeout: () => MockServerResponse;
+  flushHeaders: () => void;
+  cork: () => void;
+  uncork: () => void;
+  addTrailers: () => void;
+};
+
+/**
  * Create a mock Node.js ServerResponse for capturing response data.
  */
 function createMockResponse(): {
-  mock: EventEmitter & Record<string, unknown>;
+  mock: MockServerResponse;
   getResponse: () => { status: number; headers: Record<string, string>; body: string };
 } {
   const responseHeaders: Record<string, string | string[]> = {};
@@ -70,7 +133,7 @@ function createMockResponse(): {
   let responseStatus = 200;
   let headersSent = false;
 
-  const mock = new EventEmitter() as EventEmitter & Record<string, unknown>;
+  const mock = new EventEmitter() as MockServerResponse;
 
   mock.statusCode = 200;
   mock.statusMessage = 'OK';
@@ -198,7 +261,7 @@ app.get('/health', (c) => {
   return c.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.1.1',
+    version: VERSION,
   });
 });
 
@@ -208,7 +271,7 @@ app.get('/health', (c) => {
 app.get('/', (c) => {
   return c.json({
     name: 'Kanji Alive MCP Server',
-    version: '1.1.1',
+    version: VERSION,
     description:
       'MCP server for the Kanji Alive API - search and retrieve information about ' +
       '1,235 Japanese kanji characters taught in Japanese elementary schools.',
@@ -232,6 +295,21 @@ app.post('/mcp', async (c) => {
   const sessionId = c.req.header('mcp-session-id');
   let transport: StreamableHTTPServerTransport;
   let requestId: unknown = null;
+
+  // Validate session ID format if provided (prevents log injection, DoS)
+  if (sessionId && !isValidSessionId(sessionId)) {
+    return c.json(
+      {
+        jsonrpc: '2.0',
+        error: {
+          code: -32600,
+          message: 'Invalid session ID format',
+        },
+        id: null,
+      },
+      400
+    );
+  }
 
   try {
     const body = await c.req.json();
@@ -281,7 +359,11 @@ app.post('/mcp', async (c) => {
     const mockReq = createMockRequest(c.req.method, c.req.path, headersObj, body);
     const { mock: mockRes, getResponse } = createMockResponse();
 
-    await transport.handleRequest(mockReq as any, mockRes as any, body);
+    await transport.handleRequest(
+      mockReq as unknown as IncomingMessage,
+      mockRes as unknown as ServerResponse,
+      body
+    );
 
     // Get captured response
     const { status, headers, body: responseBody } = getResponse();
@@ -315,13 +397,28 @@ app.post('/mcp', async (c) => {
 app.get('/mcp', async (c) => {
   const sessionId = c.req.header('mcp-session-id');
 
-  if (!sessionId || !sessions.has(sessionId)) {
+  // Validate session ID format and existence
+  if (!isValidSessionId(sessionId)) {
+    return c.json(
+      {
+        jsonrpc: '2.0',
+        error: {
+          code: -32600,
+          message: 'Invalid or missing session ID',
+        },
+        id: null,
+      },
+      400
+    );
+  }
+
+  if (!sessions.has(sessionId)) {
     return c.json(
       {
         jsonrpc: '2.0',
         error: {
           code: -32000,
-          message: 'Invalid or missing session ID',
+          message: 'Session not found',
         },
         id: null,
       },
@@ -337,7 +434,10 @@ app.get('/mcp', async (c) => {
     const mockReq = createMockRequest(c.req.method, c.req.path, headersObj);
     const { mock: mockRes, getResponse } = createMockResponse();
 
-    await transport.handleRequest(mockReq as any, mockRes as any);
+    await transport.handleRequest(
+      mockReq as unknown as IncomingMessage,
+      mockRes as unknown as ServerResponse
+    );
 
     const { status, headers, body: responseBody } = getResponse();
     return new Response(responseBody, { status, headers });
@@ -346,7 +446,17 @@ app.get('/mcp', async (c) => {
       error: error instanceof Error ? error.message : String(error),
       sessionId,
     });
-    return c.json({ error: 'Internal server error' }, 500);
+    return c.json(
+      {
+        jsonrpc: '2.0',
+        error: {
+          code: -32603,
+          message: 'Internal server error',
+        },
+        id: null,
+      },
+      500
+    );
   }
 });
 
@@ -356,13 +466,28 @@ app.get('/mcp', async (c) => {
 app.delete('/mcp', async (c) => {
   const sessionId = c.req.header('mcp-session-id');
 
-  if (!sessionId || !sessions.has(sessionId)) {
+  // Validate session ID format and existence
+  if (!isValidSessionId(sessionId)) {
+    return c.json(
+      {
+        jsonrpc: '2.0',
+        error: {
+          code: -32600,
+          message: 'Invalid or missing session ID',
+        },
+        id: null,
+      },
+      400
+    );
+  }
+
+  if (!sessions.has(sessionId)) {
     return c.json(
       {
         jsonrpc: '2.0',
         error: {
           code: -32000,
-          message: 'Invalid or missing session ID',
+          message: 'Session not found',
         },
         id: null,
       },
