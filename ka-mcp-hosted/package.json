@@ -1,6 +1,6 @@
 {
   "name": "ka-mcp-hosted",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "TypeScript MCP server for Kanji Alive API - HTTP transport for Railway hosting",
   "type": "module",
   "main": "dist/index.js",

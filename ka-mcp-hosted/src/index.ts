@@ -198,7 +198,7 @@ app.get('/health', (c) => {
   return c.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.1.0',
+    version: '1.1.1',
   });
 });
 
@@ -208,7 +208,7 @@ app.get('/health', (c) => {
 app.get('/', (c) => {
   return c.json({
     name: 'Kanji Alive MCP Server',
-    version: '1.1.0',
+    version: '1.1.1',
     description:
       'MCP server for the Kanji Alive API - search and retrieve information about ' +
       '1,235 Japanese kanji characters taught in Japanese elementary schools.',
@@ -231,9 +231,11 @@ app.get('/', (c) => {
 app.post('/mcp', async (c) => {
   const sessionId = c.req.header('mcp-session-id');
   let transport: StreamableHTTPServerTransport;
+  let requestId: unknown = null;
 
   try {
     const body = await c.req.json();
+    requestId = body?.id ?? null;
 
     if (sessionId && sessions.has(sessionId)) {
       // Reuse existing session
@@ -249,6 +251,8 @@ app.post('/mcp', async (c) => {
         },
       });
 
+      // Set onclose handler BEFORE connect() to avoid race condition
+      // where connection could close before handler is registered
       transport.onclose = () => {
         if (transport.sessionId) {
           sessions.delete(transport.sessionId);
@@ -290,15 +294,7 @@ app.post('/mcp', async (c) => {
       sessionId,
     });
 
-    // Include request ID in error response (JSON-RPC 2.0 spec compliance)
-    let requestId = null;
-    try {
-      const body = await c.req.json().catch(() => null);
-      requestId = body?.id ?? null;
-    } catch {
-      // Ignore - body already consumed or invalid
-    }
-
+    // requestId was captured from the first parse (if successful)
     return c.json(
       {
         jsonrpc: '2.0',
@@ -390,25 +386,33 @@ app.delete('/mcp', async (c) => {
 /**
  * Graceful shutdown handler.
  */
-function handleShutdown(signal: string): void {
+async function handleShutdown(signal: string): Promise<void> {
   logger.info(`${signal} received, shutting down gracefully`);
 
-  // Close all active sessions
+  // Close all active sessions and await completion
+  const closePromises: Promise<void>[] = [];
   for (const [sessionId, transport] of sessions) {
-    try {
-      transport.close();
-      logger.debug('Closed session on shutdown', { sessionId });
-    } catch {
-      // Ignore errors during shutdown
-    }
+    closePromises.push(
+      Promise.resolve(transport.close())
+        .then(() => {
+          logger.debug('Closed session on shutdown', { sessionId });
+        })
+        .catch((err) => {
+          logger.debug('Error closing session on shutdown', {
+            sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        })
+    );
   }
 
+  await Promise.allSettled(closePromises);
   sessions.clear();
   process.exit(0);
 }
 
-process.on('SIGTERM', () => handleShutdown('SIGTERM'));
-process.on('SIGINT', () => handleShutdown('SIGINT'));
+process.on('SIGTERM', () => void handleShutdown('SIGTERM'));
+process.on('SIGINT', () => void handleShutdown('SIGINT'));
 
 // Validate environment and start server
 validateEnvironment();

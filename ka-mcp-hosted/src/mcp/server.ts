@@ -38,7 +38,7 @@ import { logger } from '../utils/logger.js';
 export function createMCPServer(): McpServer {
   const server = new McpServer({
     name: 'Kanji Alive',
-    version: '1.1.0',
+    version: '1.1.1',
   });
 
   // Register tools
