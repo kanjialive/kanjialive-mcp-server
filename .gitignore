@@ -30,7 +30,14 @@ wheels/
 venv/
 env/
 ENV/
-.venv
+.venv/
+ka-mcp-local/.venv/
+
+# Node.js
+node_modules/
+ka-mcp-hosted/node_modules/
+ka-mcp-hosted/dist/
+ka-mcp-hosted/coverage/
 
 # IDE
 .vscode/
