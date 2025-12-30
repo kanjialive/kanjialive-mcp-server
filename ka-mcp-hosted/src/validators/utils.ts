@@ -84,6 +84,27 @@ export const ROMAJI_WITH_DOTS_PATTERN = /^[a-zA-Z.\-]+$/;
 export const CHAPTER_PATTERN = /^c\d+$/;
 
 /**
+ * Check if a character is a valid kanji (CJK ideograph).
+ *
+ * Validates against Unicode blocks commonly containing kanji:
+ * - CJK Unified Ideographs (U+4E00–U+9FFF): Main kanji block
+ * - CJK Unified Ideographs Extension A (U+3400–U+4DBF): Rare kanji
+ *
+ * @param char - A single character to validate
+ * @returns True if the character is a kanji, false otherwise
+ */
+export function isKanjiCharacter(char: string): boolean {
+  if (char.length !== 1) return false;
+  const codePoint = char.codePointAt(0);
+  if (codePoint === undefined) return false;
+  // CJK Unified Ideographs (common kanji)
+  if (codePoint >= 0x4e00 && codePoint <= 0x9fff) return true;
+  // CJK Unified Ideographs Extension A (rare kanji)
+  if (codePoint >= 0x3400 && codePoint <= 0x4dbf) return true;
+  return false;
+}
+
+/**
  * Check if a string is pure katakana.
  *
  * @param text - Text to check

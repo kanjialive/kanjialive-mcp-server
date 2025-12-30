@@ -12,6 +12,7 @@ import {
   isHiragana,
   isRomaji,
   isRomajiWithDots,
+  isKanjiCharacter,
   VALID_RADICAL_POSITIONS,
   normalizeRadicalPosition,
   validateStudyList,
@@ -149,7 +150,18 @@ export const AdvancedSearchInputSchema = z
       .string()
       .length(1)
       .optional()
-      .transform((v) => (v ? normalizeJapaneseText(v.trim()) : undefined)),
+      .transform((v) => (v ? normalizeJapaneseText(v.trim()) : undefined))
+      .refine(
+        (v) => {
+          if (v === undefined) return true;
+          return isKanjiCharacter(v);
+        },
+        {
+          message:
+            'Invalid kanji character. Must be a CJK ideograph (e.g., 親, 見, 日). ' +
+            'Hiragana, katakana, romaji, and other characters are not accepted.',
+        }
+      ),
     rjn: hiraganaOrRomajiSchema,
     rem: z
       .string()
