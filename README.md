@@ -1,10 +1,15 @@
 # Kanji Alive MCP Server
 
-A Model Context Protocol (MCP) server that provides access to the [Kanji Alive API](https://app.kanjialive.com/api/docs) for searching and retrieving information about Japanese kanji. 
+Two Model Context Protocol (MCP) servers that provide access to the [Kanji Alive API](https://app.kanjialive.com/api/docs) for searching and retrieving information about Japanese kanji.
 
 ## Overview
 
-This MCP server enables you to search and retrieve detailed information about 1,235 kanji taught in Japanese elementary schools, including:
+This repository provides **two MCP server implementations**:
+
+- **Hosted (HTTP):** TypeScript-based server (`ka-mcp-hosted/`) for remote access (no installation required)
+- **Local (stdio):** Python-based server (`ka-mcp-local/`) for local MCP clients like Claude Desktop, ChatGPT, or MSTY (requires local installation)
+
+Both servers enable you to search and retrieve detailed information about 1,235 kanji supported by Kanji alive, including by:
 
 - Kanji meanings, readings (Onyomi/Kunyomi), and stroke counts
 - Radical information and positions
@@ -15,10 +20,17 @@ This MCP server enables you to search and retrieve detailed information about 1,
 
 ## Prerequisites
 
+**For Local Server (Python):**
 - Python 3.10 or higher
 - [uv](https://docs.astral.sh/uv/) package manager
-- A RapidAPI key (free tier available)
 - An MCP-compatible client ([Claude Desktop](https://claude.ai/download) recommended)
+
+**For Hosted Server (TypeScript):**
+- Node.js 18+ and npm
+- Railway.com account (or other hosting platform)
+
+**Both servers require:**
+- A RapidAPI key (free tier available)
 
 ## Installation
 
@@ -38,11 +50,21 @@ cd kanjialive-mcp-server
 
 ### 3. Install Dependencies
 
+**For Local Python Server:**
+
 ```bash
+cd ka-mcp-local
 uv sync
 ```
 
 This creates a `.venv` virtual environment and installs all dependencies from the lock file.
+
+**For Hosted TypeScript Server:**
+
+```bash
+cd ka-mcp-hosted
+npm install
+```
 
 ### 4. Configure API Key
 
@@ -63,11 +85,7 @@ $env:RAPIDAPI_KEY="your_api_key_here"
 
 ### 5. Configure Your MCP Client
 
-This server works with any MCP-compatible client. Configuration varies by client; below is the setup for Claude Desktop.
-
-**Other clients:** Consult your client's documentation for MCP server configuration. You'll need to provide the Python path (`.venv/bin/python`), script path (`kanjialive_mcp.py`), and the `RAPIDAPI_KEY` environment variable.
-
-#### Claude Desktop
+#### Local Server (Claude Desktop)
 
 Add the server to your configuration file:
 
@@ -79,8 +97,8 @@ Add the server to your configuration file:
 {
   "mcpServers": {
     "Kanji Alive": {
-      "command": "/path/to/kanjialive-mcp-server/.venv/bin/python",
-      "args": ["/path/to/kanjialive-mcp-server/kanjialive_mcp.py"],
+      "command": "/path/to/kanjialive-mcp-server/ka-mcp-local/.venv/bin/python",
+      "args": ["/path/to/kanjialive-mcp-server/ka-mcp-local/kanjialive_mcp.py"],
       "env": {
         "RAPIDAPI_KEY": "your_api_key_here"
       }
@@ -90,6 +108,18 @@ Add the server to your configuration file:
 ```
 
 Replace `/path/to/kanjialive-mcp-server` with the actual path to this directory.
+
+#### Hosted Server (HTTP)
+
+Deploy the TypeScript server to Railway.com or another hosting platform:
+
+```bash
+cd ka-mcp-hosted
+npm run build
+npm start
+```
+
+The server will be available at `https://your-domain.com/mcp`. Configure your MCP client to use this HTTP endpoint.
 
 ### 6. Restart Your Client
 
@@ -157,19 +187,36 @@ And two (draft) MCP resources for reference data:
 
 ## Development
 
+### Project Structure
+
+```
+ka-mcp-local/       # Python stdio server for local clients
+  ├── kanjialive_mcp.py
+  ├── data/japanese-radicals.json
+  └── pyproject.toml
+
+ka-mcp-hosted/      # TypeScript HTTP server for hosting
+  ├── src/
+  ├── src/data/japanese-radicals.json
+  └── package.json
+
+extras/             # Development resources
+  └── tests/        # Pytest test suite
+```
+
 ### Running Tests
 
-The project includes a comprehensive test suite covering validators, formatters, API layer, and tools.
+The project includes a comprehensive test suite for the Python server covering validators, formatters, API layer, and tools.
 
 ```bash
-# Install with dev dependencies
+# From repository root
 uv sync --all-extras
 
 # Run all tests
-uv run pytest tests/ -v
+uv run pytest extras/tests/ -v
 
 # Run specific test files
-uv run pytest tests/test_validators.py -v
+uv run pytest extras/tests/test_validators.py -v
 ```
 
 ### Test Coverage

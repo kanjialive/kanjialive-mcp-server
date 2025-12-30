@@ -191,7 +191,7 @@ app.post('/mcp', async (c) => {
 
     const mockReq = {
       method: c.req.method,
-      url: c.req.url,
+      url: c.req.path,
       headers: headersObj,
       rawHeaders,
       httpVersion: '1.1',
@@ -330,7 +330,7 @@ app.get('/mcp', async (c) => {
 
     const mockReq = {
       method: c.req.method,
-      url: c.req.url,
+      url: c.req.path,
       headers: headersObj,
       rawHeaders,
       httpVersion: '1.1',
