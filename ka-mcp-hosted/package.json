@@ -1,0 +1,39 @@
+{
+  "name": "ka-mcp-hosted",
+  "version": "1.0.0",
+  "description": "TypeScript MCP server for Kanji Alive API - HTTP transport for Railway hosting",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage"
+  },
+  "keywords": [
+    "mcp",
+    "kanji",
+    "japanese",
+    "api"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@hono/node-server": "^1.19.7",
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "axios": "^1.13.2",
+    "axios-retry": "^4.5.0",
+    "dotenv": "^17.2.3",
+    "hono": "^4.11.3",
+    "winston": "^3.19.0",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "@vitest/coverage-v8": "^4.0.16",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.16"
+  }
+}
