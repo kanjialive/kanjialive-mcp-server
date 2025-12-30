@@ -120,40 +120,87 @@ app.post('/mcp', async (c) => {
 
     // Handle the MCP request
     // Create a pass-through for the response
-    const responseHeaders = new Headers();
+    const responseHeaders: Record<string, string | string[]> = {};
     let responseBody = '';
     let responseStatus = 200;
+    let headersSent = false;
 
     const mockRes = {
-      writeHead: (status: number, headers?: Record<string, string>) => {
+      statusCode: 200,
+      statusMessage: 'OK',
+      headersSent: false,
+      writeHead: (status: number, statusMessage?: string | Record<string, string>, headers?: Record<string, string>) => {
         responseStatus = status;
-        if (headers) {
-          Object.entries(headers).forEach(([key, value]) => {
-            responseHeaders.set(key, value);
+        mockRes.statusCode = status;
+
+        // Handle overloaded writeHead signature
+        let actualHeaders: Record<string, string> | undefined;
+        if (typeof statusMessage === 'object') {
+          actualHeaders = statusMessage;
+        } else {
+          if (statusMessage) mockRes.statusMessage = statusMessage;
+          actualHeaders = headers;
+        }
+
+        if (actualHeaders) {
+          Object.entries(actualHeaders).forEach(([key, value]) => {
+            responseHeaders[key] = value;
           });
         }
+        headersSent = true;
+        mockRes.headersSent = true;
       },
       write: (data: string | Buffer) => {
         responseBody += data.toString();
+        return true;
       },
-      end: (data?: string | Buffer) => {
-        if (data) {
+      end: (data?: string | Buffer | (() => void), encoding?: BufferEncoding | (() => void), callback?: () => void) => {
+        if (typeof data === 'function') {
+          data();
+        } else if (data) {
           responseBody += data.toString();
         }
+        if (typeof encoding === 'function') {
+          encoding();
+        } else if (typeof callback === 'function') {
+          callback();
+        }
       },
-      setHeader: (name: string, value: string) => {
-        responseHeaders.set(name, value);
+      setHeader: (name: string, value: string | string[]) => {
+        responseHeaders[name] = value;
       },
-      getHeader: (name: string) => responseHeaders.get(name),
-      on: () => {},
+      getHeader: (name: string) => responseHeaders[name],
+      getHeaders: () => responseHeaders,
+      hasHeader: (name: string) => name in responseHeaders,
+      removeHeader: (name: string) => {
+        delete responseHeaders[name];
+      },
+      on: () => mockRes,
+      once: () => mockRes,
+      emit: () => false,
+      finished: false,
+      writable: true,
     };
 
     // Create a mock request object that works with the transport
+    const headersObj = Object.fromEntries(c.req.raw.headers.entries());
     const mockReq = {
       method: c.req.method,
-      headers: Object.fromEntries(c.req.raw.headers.entries()),
+      url: c.req.url,
+      headers: headersObj,
+      httpVersion: '1.1',
+      httpVersionMajor: 1,
+      httpVersionMinor: 1,
       body,
-      on: () => {},
+      on: () => mockReq,
+      once: () => mockReq,
+      emit: () => false,
+      read: () => null,
+      readable: true,
+      socket: {
+        remoteAddress: c.req.header('x-forwarded-for') || 'unknown',
+        remotePort: 0,
+      },
     };
 
     await transport.handleRequest(mockReq as any, mockRes as any, body);
@@ -161,7 +208,10 @@ app.post('/mcp', async (c) => {
     // Return the response
     const response = new Response(responseBody, {
       status: responseStatus,
-      headers: responseHeaders,
+      headers: Object.entries(responseHeaders).reduce((acc, [key, value]) => {
+        acc[key] = Array.isArray(value) ? value.join(', ') : value;
+        return acc;
+      }, {} as Record<string, string>),
     });
 
     return response;
@@ -209,40 +259,90 @@ app.get('/mcp', async (c) => {
 
   // Handle SSE request
   try {
-    const responseHeaders = new Headers();
+    const responseHeaders: Record<string, string | string[]> = {};
     let responseBody = '';
 
     const mockRes = {
-      writeHead: (status: number, headers?: Record<string, string>) => {
-        if (headers) {
-          Object.entries(headers).forEach(([key, value]) => {
-            responseHeaders.set(key, value);
+      statusCode: 200,
+      statusMessage: 'OK',
+      headersSent: false,
+      writeHead: (status: number, statusMessage?: string | Record<string, string>, headers?: Record<string, string>) => {
+        mockRes.statusCode = status;
+
+        let actualHeaders: Record<string, string> | undefined;
+        if (typeof statusMessage === 'object') {
+          actualHeaders = statusMessage;
+        } else {
+          if (statusMessage) mockRes.statusMessage = statusMessage;
+          actualHeaders = headers;
+        }
+
+        if (actualHeaders) {
+          Object.entries(actualHeaders).forEach(([key, value]) => {
+            responseHeaders[key] = value;
           });
         }
+        mockRes.headersSent = true;
       },
       write: (data: string | Buffer) => {
         responseBody += data.toString();
+        return true;
       },
-      end: (data?: string | Buffer) => {
-        if (data) {
+      end: (data?: string | Buffer | (() => void), encoding?: BufferEncoding | (() => void), callback?: () => void) => {
+        if (typeof data === 'function') {
+          data();
+        } else if (data) {
           responseBody += data.toString();
         }
+        if (typeof encoding === 'function') {
+          encoding();
+        } else if (typeof callback === 'function') {
+          callback();
+        }
       },
-      setHeader: (name: string, value: string) => {
-        responseHeaders.set(name, value);
+      setHeader: (name: string, value: string | string[]) => {
+        responseHeaders[name] = value;
       },
-      on: () => {},
+      getHeader: (name: string) => responseHeaders[name],
+      getHeaders: () => responseHeaders,
+      hasHeader: (name: string) => name in responseHeaders,
+      removeHeader: (name: string) => {
+        delete responseHeaders[name];
+      },
+      on: () => mockRes,
+      once: () => mockRes,
+      emit: () => false,
+      finished: false,
+      writable: true,
     };
 
+    const headersObj = Object.fromEntries(c.req.raw.headers.entries());
     const mockReq = {
       method: c.req.method,
-      headers: Object.fromEntries(c.req.raw.headers.entries()),
-      on: () => {},
+      url: c.req.url,
+      headers: headersObj,
+      httpVersion: '1.1',
+      httpVersionMajor: 1,
+      httpVersionMinor: 1,
+      on: () => mockReq,
+      once: () => mockReq,
+      emit: () => false,
+      read: () => null,
+      readable: true,
+      socket: {
+        remoteAddress: c.req.header('x-forwarded-for') || 'unknown',
+        remotePort: 0,
+      },
     };
 
     await transport.handleRequest(mockReq as any, mockRes as any);
 
-    return new Response(responseBody, { headers: responseHeaders });
+    return new Response(responseBody, {
+      headers: Object.entries(responseHeaders).reduce((acc, [key, value]) => {
+        acc[key] = Array.isArray(value) ? value.join(', ') : value;
+        return acc;
+      }, {} as Record<string, string>),
+    });
   } catch (error) {
     logger.error('MCP GET error', { error, sessionId });
     return c.json({ error: 'Internal server error' }, 500);
