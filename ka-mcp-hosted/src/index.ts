@@ -184,10 +184,16 @@ app.post('/mcp', async (c) => {
 
     // Create a mock request object that works with the transport
     const headersObj = Object.fromEntries(c.req.raw.headers.entries());
+    const rawHeaders: string[] = [];
+    for (const [key, value] of c.req.raw.headers.entries()) {
+      rawHeaders.push(key, value);
+    }
+
     const mockReq = {
       method: c.req.method,
       url: c.req.url,
       headers: headersObj,
+      rawHeaders,
       httpVersion: '1.1',
       httpVersionMajor: 1,
       httpVersionMinor: 1,
@@ -317,10 +323,16 @@ app.get('/mcp', async (c) => {
     };
 
     const headersObj = Object.fromEntries(c.req.raw.headers.entries());
+    const rawHeaders: string[] = [];
+    for (const [key, value] of c.req.raw.headers.entries()) {
+      rawHeaders.push(key, value);
+    }
+
     const mockReq = {
       method: c.req.method,
       url: c.req.url,
       headers: headersObj,
+      rawHeaders,
       httpVersion: '1.1',
       httpVersionMajor: 1,
       httpVersionMinor: 1,
