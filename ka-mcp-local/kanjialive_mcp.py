@@ -57,23 +57,20 @@ DATA_DIR = Path(__file__).parent / "data"
 _RADICALS_CACHE: Optional[Dict[str, Any]] = None
 
 
-def _load_radicals_data() -> Dict[str, Any]:
+def _load_radicals_data_from_file() -> Dict[str, Any]:
     """
-    Load the Japanese radicals reference data from bundled JSON.
+    Load the Japanese radicals reference data from bundled JSON file.
 
-    The data is cached after first load to avoid repeated file I/O.
+    This is the actual file loading logic, called once during server startup.
+    After startup, use _get_radicals_cache() to access the cached data.
 
     Returns:
         Dict containing radicals data with metadata and radical entries
 
     Raises:
         FileNotFoundError: If the radicals JSON file is missing
+        json.JSONDecodeError: If the JSON file is corrupted
     """
-    global _RADICALS_CACHE
-
-    if _RADICALS_CACHE is not None:
-        return _RADICALS_CACHE
-
     radicals_file = DATA_DIR / "japanese-radicals.json"
 
     if not radicals_file.exists():
@@ -82,10 +79,37 @@ def _load_radicals_data() -> Dict[str, Any]:
             f"Run 'python scripts/convert_radicals_csv.py' to generate it."
         )
 
-    with open(radicals_file, 'r', encoding='utf-8') as f:
-        _RADICALS_CACHE = json.load(f)
+    try:
+        with open(radicals_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        raise json.JSONDecodeError(
+            f"Corrupted radicals data file: {radicals_file}. "
+            f"The JSON file is malformed and cannot be parsed. "
+            f"Original error: {e.msg}",
+            e.doc,
+            e.pos
+        )
 
-    logger.debug(f"Loaded {_RADICALS_CACHE.get('total_entries', 0)} radicals from {radicals_file}")
+    logger.info(f"Loaded {data.get('total_entries', 0)} radicals from {radicals_file}")
+    return data
+
+
+def _get_radicals_cache() -> Dict[str, Any]:
+    """
+    Get the radicals cache, which must have been initialized at startup.
+
+    Returns:
+        Dict containing radicals data
+
+    Raises:
+        RuntimeError: If cache was not initialized during server startup
+    """
+    if _RADICALS_CACHE is None:
+        raise RuntimeError(
+            "Radicals cache not initialized. "
+            "This should have been loaded during server startup."
+        )
     return _RADICALS_CACHE
 
 
@@ -106,7 +130,21 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
 
     This context manager handles the creation and cleanup of shared resources
     like the HTTP client, ensuring proper cleanup on any exit path.
+
+    Also initializes the radicals cache at startup to:
+    - Fail fast if the data file is missing or corrupted
+    - Avoid race conditions from lazy-loading
     """
+    global _RADICALS_CACHE
+
+    # Load radicals cache at startup (fail-fast on missing/corrupted file)
+    try:
+        _RADICALS_CACHE = _load_radicals_data_from_file()
+        logger.info("Radicals cache initialized successfully")
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logger.error(f"Failed to load radicals data: {e}")
+        raise
+
     headers = _get_api_headers()
     client = httpx.AsyncClient(
         timeout=REQUEST_TIMEOUT,
@@ -175,12 +213,23 @@ def _normalize_japanese_text(text: str) -> str:
         return str(text)
     return unicodedata.normalize('NFKC', text)
 
-# Markdown escaping
-_MD_SPECIAL = re.compile(r'([\\`*_{}[\]()#+\-.!|>])')
+# Markdown escaping - characters that have special meaning in markdown
+# Includes: \ ` * _ { } [ ] ( ) # + - . ! | > < ~
+# Note: We escape all these characters conservatively to prevent formatting issues.
+# While some characters only have special meaning in specific contexts (e.g., - and .
+# at line start for lists), escaping them everywhere is safer for untrusted content.
+_MD_SPECIAL = re.compile(r'([\\`*_{}[\]()#+\-.!|><~])')
 
 def _escape_markdown(text: str) -> str:
     """
     Escape special Markdown characters to prevent formatting issues.
+
+    Escapes characters that could be interpreted as markdown formatting:
+    - Backslash, backticks, asterisks, underscores (emphasis/code)
+    - Brackets, parentheses (links/images)
+    - Hash, plus, minus, period (headers/lists)
+    - Exclamation, pipe, greater/less than (images/tables/HTML)
+    - Tilde (strikethrough in some flavors)
 
     Args:
         text: String that may contain Markdown special characters
@@ -211,6 +260,76 @@ RPOS_NORMALIZE = {
 }
 
 
+def _validate_no_control_chars(text: str, field_name: str = "input") -> str:
+    """
+    Validate that text does not contain null bytes or control characters.
+
+    Control characters (U+0000-U+001F, U+007F-U+009F) can cause issues with
+    HTTP libraries, URLs, and downstream systems. This rejects them early
+    with a clear error message.
+
+    Args:
+        text: Text to validate
+        field_name: Name of the field for error messages
+
+    Returns:
+        The original text if valid
+
+    Raises:
+        ValueError: If text contains control characters
+    """
+    # Check for null bytes explicitly (most dangerous)
+    if '\x00' in text:
+        raise ValueError(
+            f"Invalid {field_name}: contains null byte (\\x00). "
+            f"Please remove any null characters from your input."
+        )
+
+    # Check for other control characters (C0 and C1 control codes)
+    for i, char in enumerate(text):
+        code = ord(char)
+        # C0 control codes (0x00-0x1F) except common whitespace (tab, newline, carriage return)
+        if code < 0x20 and code not in (0x09, 0x0A, 0x0D):
+            raise ValueError(
+                f"Invalid {field_name}: contains control character (U+{code:04X}) at position {i}. "
+                f"Please use only printable characters."
+            )
+        # C1 control codes (0x7F-0x9F)
+        if 0x7F <= code <= 0x9F:
+            raise ValueError(
+                f"Invalid {field_name}: contains control character (U+{code:04X}) at position {i}. "
+                f"Please use only printable characters."
+            )
+
+    return text
+
+
+def _is_kanji_character(char: str) -> bool:
+    """
+    Check if a character is a valid kanji (CJK ideograph).
+
+    Validates against Unicode blocks commonly containing kanji:
+    - CJK Unified Ideographs (U+4E00–U+9FFF): Main kanji block
+    - CJK Unified Ideographs Extension A (U+3400–U+4DBF): Rare kanji
+
+    Args:
+        char: A single character to validate
+
+    Returns:
+        True if the character is a kanji, False otherwise
+    """
+    if len(char) != 1:
+        return False
+    code_point = ord(char)
+    # CJK Unified Ideographs (common kanji)
+    if 0x4E00 <= code_point <= 0x9FFF:
+        return True
+    # CJK Unified Ideographs Extension A (rare kanji)
+    if 0x3400 <= code_point <= 0x4DBF:
+        return True
+    return False
+
+
 # ============================================================================
 # Pydantic Input Models
 # ============================================================================
@@ -238,9 +357,12 @@ class KanjiBasicSearchInput(BaseModel):
 
     @field_validator('query')
     @classmethod
-    def normalize_query(cls, v: str) -> str:
-        """Normalize Unicode in query string."""
-        return _normalize_japanese_text(v.strip())
+    def validate_and_normalize_query(cls, v: str) -> str:
+        """Validate and normalize query string."""
+        v = v.strip()
+        # Reject control characters (null bytes, etc.) before processing
+        _validate_no_control_chars(v, "query")
+        return _normalize_japanese_text(v)
 
 
 class KanjiAdvancedSearchInput(BaseModel):
@@ -431,6 +553,24 @@ class KanjiAdvancedSearchInput(BaseModel):
         """Strip whitespace from English meaning fields."""
         return v.strip() if v else v
 
+    @field_validator('kanji')
+    @classmethod
+    def validate_kanji_character(cls, v: Optional[str]) -> Optional[str]:
+        """Validate that the kanji field contains a valid kanji character."""
+        if v is None:
+            return v
+
+        v = _normalize_japanese_text(v.strip())
+
+        if not _is_kanji_character(v):
+            raise ValueError(
+                f"Invalid kanji character '{v}'. "
+                f"Must be a CJK ideograph (e.g., 親, 見, 日). "
+                f"Hiragana, katakana, romaji, and other characters are not accepted."
+            )
+
+        return v
+
     def has_any_filter(self) -> bool:
         """Check if any search filter is provided."""
         return any([
@@ -457,9 +597,18 @@ class KanjiDetailInput(BaseModel):
 
     @field_validator('character')
     @classmethod
-    def normalize_character(cls, v: str) -> str:
-        """Normalize Unicode in character."""
-        return _normalize_japanese_text(v.strip())
+    def validate_and_normalize_character(cls, v: str) -> str:
+        """Validate and normalize kanji character."""
+        v = _normalize_japanese_text(v.strip())
+
+        if not _is_kanji_character(v):
+            raise ValueError(
+                f"Invalid kanji character '{v}'. "
+                f"Must be a CJK ideograph (e.g., 親, 見, 日). "
+                f"Hiragana, katakana, romaji, and other characters are not accepted."
+            )
+
+        return v
 
 
 class SearchResultMetadata(BaseModel):
@@ -623,7 +772,11 @@ async def _make_api_request(
     # If we exhausted all retries, raise the last exception
     if last_exception:
         raise last_exception
-    raise httpx.HTTPError("Request failed after retries")
+    # This fallback should never be reached, but include full context if it is
+    raise httpx.HTTPError(
+        f"Request failed after {max_retries} retries. "
+        f"URL: {url}, params: {params}"
+    )
 
 
 def _validate_search_response(data: Any, endpoint: str) -> None:
@@ -737,7 +890,16 @@ def _handle_api_error(e: Exception) -> None:
             raise ToolError("Rate limit exceeded. Please wait a moment before making more requests.")
         elif e.response.status_code >= 500:
             raise ToolError("Kanji Alive server error. Please try again later.")
-        raise ToolError(f"API request failed with status {e.response.status_code}: {e.response.text}")
+        # For other status codes, sanitize the response text to avoid information disclosure
+        # Log the full response for debugging, but only show status code to user
+        logger.warning(
+            f"API error {e.response.status_code}",
+            extra={"response_text": e.response.text[:500] if e.response.text else ""}
+        )
+        raise ToolError(
+            f"API request failed with status {e.response.status_code}. "
+            f"Please check your request parameters and try again."
+        )
     elif isinstance(e, httpx.TimeoutException):
         raise ToolError("Request timed out. The Kanji Alive API may be experiencing issues. Please try again.")
     elif isinstance(e, httpx.RequestError):
@@ -801,12 +963,33 @@ def _format_search_results_markdown(
     for kanji in results:
         char = kanji.get('kanji', {}).get('character', '?')
         # Search API uses 'stroke' (singular) as direct integer
-        strokes = kanji.get('kanji', {}).get('stroke', 'N/A')
+        strokes_raw = kanji.get('kanji', {}).get('stroke')
+        if strokes_raw is None:
+            strokes = 'N/A'
+        elif isinstance(strokes_raw, int):
+            strokes = strokes_raw
+        else:
+            # Unexpected type - log warning and show N/A
+            logger.warning(
+                f"Unexpected strokes type in search result for '{char}'",
+                extra={"strokes_value": strokes_raw, "strokes_type": type(strokes_raw).__name__}
+            )
+            strokes = 'N/A'
 
         # Get radical info - search API uses 'stroke' (singular)
         radical = kanji.get('radical', {})
         radical_char = radical.get('character', 'N/A')
-        radical_strokes = radical.get('stroke', 'N/A')
+        radical_strokes_raw = radical.get('stroke')
+        if radical_strokes_raw is None:
+            radical_strokes = 'N/A'
+        elif isinstance(radical_strokes_raw, int):
+            radical_strokes = radical_strokes_raw
+        else:
+            logger.warning(
+                f"Unexpected radical strokes type for '{char}'",
+                extra={"strokes_value": radical_strokes_raw, "strokes_type": type(radical_strokes_raw).__name__}
+            )
+            radical_strokes = 'N/A'
         # Radical order is the index in the 214 traditional kanji radicals
         radical_order = radical.get('order', 'N/A')
 
@@ -831,8 +1014,28 @@ def _format_kanji_detail_markdown(kanji: Dict[str, Any]) -> str:
     k_info = kanji.get('kanji', {})
     meaning = k_info.get('meaning', {}).get('english', 'N/A')
     # Detail API uses 'strokes' as object with 'count', 'timings', 'images'
-    strokes_obj = k_info.get('strokes', {})
-    strokes = strokes_obj.get('count', 'N/A') if isinstance(strokes_obj, dict) else strokes_obj
+    strokes_raw = k_info.get('strokes')
+    if strokes_raw is None:
+        strokes = 'N/A'
+    elif isinstance(strokes_raw, dict):
+        stroke_count = strokes_raw.get('count')
+        if stroke_count is not None and isinstance(stroke_count, int):
+            strokes = stroke_count
+        else:
+            logger.warning(
+                f"Missing or invalid stroke count in detail response for '{char}'",
+                extra={"strokes_data": strokes_raw}
+            )
+            strokes = 'N/A'
+    elif isinstance(strokes_raw, int):
+        # Direct integer (legacy or simplified format)
+        strokes = strokes_raw
+    else:
+        logger.warning(
+            f"Unexpected strokes type in detail response for '{char}'",
+            extra={"strokes_value": strokes_raw, "strokes_type": type(strokes_raw).__name__}
+        )
+        strokes = 'N/A'
     # Grade is in references object, not directly on kanji
     refs = kanji.get('references', {})
     grade = refs.get('grade', None)
@@ -920,11 +1123,19 @@ def _format_kanji_detail_markdown(kanji: Dict[str, Any]) -> str:
             output += f"- **Classic Nelson:** {refs['classic_nelson']}\n"
         output += "\n"
 
-    # Examples
+    # Examples - limit to prevent overwhelming responses
+    MAX_EXAMPLES = 15
     examples = kanji.get('examples', [])
     if examples:
-        output += "## Example Words\n\n"
-        for ex in examples:  # Show ALL examples - no truncation
+        total_examples = len(examples)
+        display_examples = examples[:MAX_EXAMPLES]
+
+        if total_examples > MAX_EXAMPLES:
+            output += f"## Example Words (showing {MAX_EXAMPLES} of {total_examples})\n\n"
+        else:
+            output += "## Example Words\n\n"
+
+        for ex in display_examples:
             japanese = ex.get('japanese', '')
             meaning_en = ex.get('meaning', {}).get('english', '')
             audio = ex.get('audio', {})
@@ -936,6 +1147,9 @@ def _format_kanji_detail_markdown(kanji: Dict[str, Any]) -> str:
             if audio_url:
                 output += f"**Audio:** <{audio_url}>\n"
             output += "\n"
+
+        if total_examples > MAX_EXAMPLES:
+            output += f"*... and {total_examples - MAX_EXAMPLES} more examples not shown.*\n\n"
 
     return output
 
@@ -1218,10 +1432,19 @@ def _filter_kanji_detail_response(raw_data: Dict[str, Any]) -> Dict[str, Any]:
             kanji_filtered['meaning'] = kanji_raw['meaning']
 
         # strokes: API returns object {count, timings, images}, docs show integer
+        # Use None for missing/malformed data - 0 would be misleading since no kanji has 0 strokes
         if 'strokes' in kanji_raw:
             strokes = kanji_raw['strokes']
             if isinstance(strokes, dict):
-                kanji_filtered['strokes'] = strokes.get('count', 0)
+                stroke_count = strokes.get('count')
+                if stroke_count is not None:
+                    kanji_filtered['strokes'] = stroke_count
+                else:
+                    logger.warning(
+                        f"Missing stroke count in strokes object for kanji",
+                        extra={"strokes_data": strokes}
+                    )
+                    kanji_filtered['strokes'] = None
             else:
                 kanji_filtered['strokes'] = strokes
 
@@ -1371,12 +1594,14 @@ async def radicals_resource() -> str:
     - Identify important radicals for study prioritization
     """
     try:
-        radicals_data = _load_radicals_data()
+        radicals_data = _get_radicals_cache()
         return json.dumps(radicals_data, ensure_ascii=False, indent=2)
-    except FileNotFoundError as e:
+    except RuntimeError as e:
+        # This should never happen if server started correctly
+        logger.error(f"Radicals cache access failed: {e}")
         return json.dumps({
             "error": str(e),
-            "hint": "The radicals data file needs to be generated from the source CSV."
+            "hint": "The server may not have initialized correctly. Check startup logs."
         }, ensure_ascii=False, indent=2)
 
 
