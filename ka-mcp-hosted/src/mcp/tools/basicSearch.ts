@@ -104,6 +104,21 @@ export async function executeBasicSearch(
     logger.error('Basic search error', {
       error: error instanceof Error ? error.message : String(error),
     });
-    handleApiError(error);
+
+    // handleApiError throws ToolError - catch it and return proper MCP response
+    try {
+      handleApiError(error);
+    } catch (toolError) {
+      return {
+        content: [{ type: 'text', text: toolError instanceof ToolError ? toolError.message : 'An unexpected error occurred' }],
+        isError: true,
+      };
+    }
+
+    // Fallback (should never reach here)
+    return {
+      content: [{ type: 'text', text: 'An unexpected error occurred' }],
+      isError: true,
+    };
   }
 }

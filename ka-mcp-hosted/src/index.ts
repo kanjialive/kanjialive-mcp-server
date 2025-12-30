@@ -11,9 +11,155 @@ import { serve } from '@hono/node-server';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
+import { Readable } from 'node:stream';
+import { EventEmitter } from 'node:events';
 import { createMCPServer } from './mcp/server.js';
 import { logger } from './utils/logger.js';
 import { getApiHeaders } from './api/client.js';
+
+/**
+ * Create a mock Node.js IncomingMessage from Hono request context.
+ */
+function createMockRequest(
+  method: string,
+  path: string,
+  headers: Record<string, string>,
+  _body?: unknown
+): unknown {
+  const rawHeaders: string[] = [];
+  for (const [key, value] of Object.entries(headers)) {
+    rawHeaders.push(key, value);
+  }
+
+  // Create a readable stream (body is passed separately to handleRequest)
+  const stream = new Readable({
+    read() {
+      this.push(null);
+    },
+  });
+
+  // Extend stream with IncomingMessage properties
+  const mockReq = Object.assign(stream, {
+    method,
+    url: path,
+    headers,
+    rawHeaders,
+    httpVersion: '1.1',
+    httpVersionMajor: 1,
+    httpVersionMinor: 1,
+    complete: true,
+    socket: {
+      remoteAddress: headers['x-forwarded-for'] || 'unknown',
+      remotePort: 0,
+    },
+    connection: null,
+  });
+
+  return mockReq;
+}
+
+/**
+ * Create a mock Node.js ServerResponse for capturing response data.
+ */
+function createMockResponse(): {
+  mock: EventEmitter & Record<string, unknown>;
+  getResponse: () => { status: number; headers: Record<string, string>; body: string };
+} {
+  const responseHeaders: Record<string, string | string[]> = {};
+  const responseChunks: string[] = [];
+  let responseStatus = 200;
+  let headersSent = false;
+
+  const mock = new EventEmitter() as EventEmitter & Record<string, unknown>;
+
+  mock.statusCode = 200;
+  mock.statusMessage = 'OK';
+  mock.headersSent = false;
+  mock.finished = false;
+  mock.writable = true;
+
+  mock.writeHead = (
+    status: number,
+    statusMessage?: string | Record<string, string>,
+    headers?: Record<string, string>
+  ) => {
+    responseStatus = status;
+    mock.statusCode = status;
+
+    let actualHeaders: Record<string, string> | undefined;
+    if (typeof statusMessage === 'object') {
+      actualHeaders = statusMessage;
+    } else {
+      if (statusMessage) mock.statusMessage = statusMessage;
+      actualHeaders = headers;
+    }
+
+    if (actualHeaders) {
+      Object.assign(responseHeaders, actualHeaders);
+    }
+    headersSent = true;
+    mock.headersSent = true;
+    return mock;
+  };
+
+  mock.write = (chunk: string | Buffer) => {
+    responseChunks.push(chunk.toString());
+    return true;
+  };
+
+  mock.end = (
+    data?: string | Buffer | (() => void),
+    encoding?: BufferEncoding | (() => void),
+    callback?: () => void
+  ) => {
+    if (typeof data === 'function') {
+      data();
+    } else if (data) {
+      responseChunks.push(data.toString());
+    }
+    if (typeof encoding === 'function') {
+      encoding();
+    } else if (typeof callback === 'function') {
+      callback();
+    }
+    mock.finished = true;
+    mock.emit('finish');
+    return mock;
+  };
+
+  mock.setHeader = (name: string, value: string | string[]) => {
+    responseHeaders[name] = value;
+  };
+
+  mock.getHeader = (name: string) => responseHeaders[name];
+  mock.getHeaders = () => ({ ...responseHeaders });
+  mock.hasHeader = (name: string) => name in responseHeaders;
+  mock.removeHeader = (name: string) => {
+    delete responseHeaders[name];
+  };
+
+  // Additional methods that might be called
+  mock.writeContinue = () => {};
+  mock.setTimeout = () => mock;
+  mock.flushHeaders = () => {};
+  mock.cork = () => {};
+  mock.uncork = () => {};
+  mock.addTrailers = () => {};
+
+  const getResponse = () => ({
+    status: responseStatus,
+    headers: Object.entries(responseHeaders).reduce(
+      (acc, [key, value]) => {
+        acc[key] = Array.isArray(value) ? value.join(', ') : value;
+        return acc;
+      },
+      {} as Record<string, string>
+    ),
+    body: responseChunks.join(''),
+  });
+
+  return { mock, getResponse };
+}
 
 const app = new Hono();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -120,114 +266,32 @@ app.post('/mcp', async (c) => {
       );
     }
 
-    // Handle the MCP request
-    // Create a pass-through for the response
-    const responseHeaders: Record<string, string | string[]> = {};
-    let responseBody = '';
-    let responseStatus = 200;
-    let headersSent = false;
-
-    const mockRes = {
-      statusCode: 200,
-      statusMessage: 'OK',
-      headersSent: false,
-      writeHead: (status: number, statusMessage?: string | Record<string, string>, headers?: Record<string, string>) => {
-        responseStatus = status;
-        mockRes.statusCode = status;
-
-        // Handle overloaded writeHead signature
-        let actualHeaders: Record<string, string> | undefined;
-        if (typeof statusMessage === 'object') {
-          actualHeaders = statusMessage;
-        } else {
-          if (statusMessage) mockRes.statusMessage = statusMessage;
-          actualHeaders = headers;
-        }
-
-        if (actualHeaders) {
-          Object.entries(actualHeaders).forEach(([key, value]) => {
-            responseHeaders[key] = value;
-          });
-        }
-        headersSent = true;
-        mockRes.headersSent = true;
-      },
-      write: (data: string | Buffer) => {
-        responseBody += data.toString();
-        return true;
-      },
-      end: (data?: string | Buffer | (() => void), encoding?: BufferEncoding | (() => void), callback?: () => void) => {
-        if (typeof data === 'function') {
-          data();
-        } else if (data) {
-          responseBody += data.toString();
-        }
-        if (typeof encoding === 'function') {
-          encoding();
-        } else if (typeof callback === 'function') {
-          callback();
-        }
-      },
-      setHeader: (name: string, value: string | string[]) => {
-        responseHeaders[name] = value;
-      },
-      getHeader: (name: string) => responseHeaders[name],
-      getHeaders: () => responseHeaders,
-      hasHeader: (name: string) => name in responseHeaders,
-      removeHeader: (name: string) => {
-        delete responseHeaders[name];
-      },
-      on: () => mockRes,
-      once: () => mockRes,
-      emit: () => false,
-      finished: false,
-      writable: true,
-    };
-
-    // Create a mock request object that works with the transport
+    // Create mock request/response using proper Node.js interfaces
     const headersObj = Object.fromEntries(c.req.raw.headers.entries());
-    const rawHeaders: string[] = [];
-    for (const [key, value] of c.req.raw.headers.entries()) {
-      rawHeaders.push(key, value);
-    }
-
-    const mockReq = {
-      method: c.req.method,
-      url: c.req.path,
-      headers: headersObj,
-      rawHeaders,
-      httpVersion: '1.1',
-      httpVersionMajor: 1,
-      httpVersionMinor: 1,
-      body,
-      on: () => mockReq,
-      once: () => mockReq,
-      emit: () => false,
-      read: () => null,
-      readable: true,
-      socket: {
-        remoteAddress: c.req.header('x-forwarded-for') || 'unknown',
-        remotePort: 0,
-      },
-    };
+    const mockReq = createMockRequest(c.req.method, c.req.path, headersObj, body);
+    const { mock: mockRes, getResponse } = createMockResponse();
 
     await transport.handleRequest(mockReq as any, mockRes as any, body);
 
-    // Return the response
-    const response = new Response(responseBody, {
-      status: responseStatus,
-      headers: Object.entries(responseHeaders).reduce((acc, [key, value]) => {
-        acc[key] = Array.isArray(value) ? value.join(', ') : value;
-        return acc;
-      }, {} as Record<string, string>),
-    });
+    // Get captured response
+    const { status, headers, body: responseBody } = getResponse();
 
-    return response;
+    return new Response(responseBody || '{}', { status, headers });
   } catch (error) {
     logger.error('MCP request error', {
       error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
       sessionId,
     });
+
+    // Include request ID in error response (JSON-RPC 2.0 spec compliance)
+    let requestId = null;
+    try {
+      const body = await c.req.json().catch(() => null);
+      requestId = body?.id ?? null;
+    } catch {
+      // Ignore - body already consumed or invalid
+    }
 
     return c.json(
       {
@@ -236,7 +300,7 @@ app.post('/mcp', async (c) => {
           code: -32603,
           message: 'Internal server error',
         },
-        id: null,
+        id: requestId,
       },
       500
     );
@@ -267,98 +331,19 @@ app.get('/mcp', async (c) => {
 
   // Handle SSE request
   try {
-    const responseHeaders: Record<string, string | string[]> = {};
-    let responseBody = '';
-
-    const mockRes = {
-      statusCode: 200,
-      statusMessage: 'OK',
-      headersSent: false,
-      writeHead: (status: number, statusMessage?: string | Record<string, string>, headers?: Record<string, string>) => {
-        mockRes.statusCode = status;
-
-        let actualHeaders: Record<string, string> | undefined;
-        if (typeof statusMessage === 'object') {
-          actualHeaders = statusMessage;
-        } else {
-          if (statusMessage) mockRes.statusMessage = statusMessage;
-          actualHeaders = headers;
-        }
-
-        if (actualHeaders) {
-          Object.entries(actualHeaders).forEach(([key, value]) => {
-            responseHeaders[key] = value;
-          });
-        }
-        mockRes.headersSent = true;
-      },
-      write: (data: string | Buffer) => {
-        responseBody += data.toString();
-        return true;
-      },
-      end: (data?: string | Buffer | (() => void), encoding?: BufferEncoding | (() => void), callback?: () => void) => {
-        if (typeof data === 'function') {
-          data();
-        } else if (data) {
-          responseBody += data.toString();
-        }
-        if (typeof encoding === 'function') {
-          encoding();
-        } else if (typeof callback === 'function') {
-          callback();
-        }
-      },
-      setHeader: (name: string, value: string | string[]) => {
-        responseHeaders[name] = value;
-      },
-      getHeader: (name: string) => responseHeaders[name],
-      getHeaders: () => responseHeaders,
-      hasHeader: (name: string) => name in responseHeaders,
-      removeHeader: (name: string) => {
-        delete responseHeaders[name];
-      },
-      on: () => mockRes,
-      once: () => mockRes,
-      emit: () => false,
-      finished: false,
-      writable: true,
-    };
-
     const headersObj = Object.fromEntries(c.req.raw.headers.entries());
-    const rawHeaders: string[] = [];
-    for (const [key, value] of c.req.raw.headers.entries()) {
-      rawHeaders.push(key, value);
-    }
-
-    const mockReq = {
-      method: c.req.method,
-      url: c.req.path,
-      headers: headersObj,
-      rawHeaders,
-      httpVersion: '1.1',
-      httpVersionMajor: 1,
-      httpVersionMinor: 1,
-      on: () => mockReq,
-      once: () => mockReq,
-      emit: () => false,
-      read: () => null,
-      readable: true,
-      socket: {
-        remoteAddress: c.req.header('x-forwarded-for') || 'unknown',
-        remotePort: 0,
-      },
-    };
+    const mockReq = createMockRequest(c.req.method, c.req.path, headersObj);
+    const { mock: mockRes, getResponse } = createMockResponse();
 
     await transport.handleRequest(mockReq as any, mockRes as any);
 
-    return new Response(responseBody, {
-      headers: Object.entries(responseHeaders).reduce((acc, [key, value]) => {
-        acc[key] = Array.isArray(value) ? value.join(', ') : value;
-        return acc;
-      }, {} as Record<string, string>),
-    });
+    const { status, headers, body: responseBody } = getResponse();
+    return new Response(responseBody, { status, headers });
   } catch (error) {
-    logger.error('MCP GET error', { error, sessionId });
+    logger.error('MCP GET error', {
+      error: error instanceof Error ? error.message : String(error),
+      sessionId,
+    });
     return c.json({ error: 'Internal server error' }, 500);
   }
 });
