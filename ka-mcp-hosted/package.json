@@ -19,6 +19,9 @@
   ],
   "author": "",
   "license": "ISC",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "dependencies": {
     "@hono/node-server": "^1.19.7",
     "@modelcontextprotocol/sdk": "^1.25.1",
