@@ -38,7 +38,7 @@ import { logger } from '../utils/logger.js';
 export function createMCPServer(): McpServer {
   const server = new McpServer({
     name: 'Kanji Alive',
-    version: '1.0.0',
+    version: '1.1.0',
   });
 
   // Register tools
@@ -56,6 +56,16 @@ export function createMCPServer(): McpServer {
 }
 
 /**
+ * Tool annotations indicating behavior hints for clients.
+ * All Kanji Alive tools are read-only, non-destructive, and idempotent.
+ */
+const TOOL_ANNOTATIONS = {
+  readOnlyHint: true,      // Tools only read data, never modify state
+  destructiveHint: false,  // Tools never delete or destroy data
+  idempotentHint: true,    // Same input always produces same output
+} as const;
+
+/**
  * Register all MCP tools.
  *
  * @param server - MCP server instance
@@ -66,6 +76,7 @@ function registerTools(server: McpServer): void {
     BASIC_SEARCH_TOOL_NAME,
     BASIC_SEARCH_TOOL_DESCRIPTION,
     basicSearchParamsShape,
+    TOOL_ANNOTATIONS,
     async (args) => {
       const result = await executeBasicSearch(args);
       return result;
@@ -77,6 +88,7 @@ function registerTools(server: McpServer): void {
     ADVANCED_SEARCH_TOOL_NAME,
     ADVANCED_SEARCH_TOOL_DESCRIPTION,
     advancedSearchParamsShape,
+    TOOL_ANNOTATIONS,
     async (args) => {
       const result = await executeAdvancedSearch(args);
       return result;
@@ -88,13 +100,14 @@ function registerTools(server: McpServer): void {
     KANJI_DETAIL_TOOL_NAME,
     KANJI_DETAIL_TOOL_DESCRIPTION,
     kanjiDetailParamsShape,
+    TOOL_ANNOTATIONS,
     async (args) => {
       const result = await executeKanjiDetails(args);
       return result;
     }
   );
 
-  logger.debug('Registered 3 MCP tools');
+  logger.debug('Registered 3 MCP tools with annotations');
 }
 
 /**

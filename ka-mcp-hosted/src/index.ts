@@ -192,7 +192,7 @@ app.get('/health', (c) => {
   return c.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.0.0',
+    version: '1.1.0',
   });
 });
 
@@ -202,7 +202,7 @@ app.get('/health', (c) => {
 app.get('/', (c) => {
   return c.json({
     name: 'Kanji Alive MCP Server',
-    version: '1.0.0',
+    version: '1.1.0',
     description:
       'MCP server for the Kanji Alive API - search and retrieve information about ' +
       '1,235 Japanese kanji characters taught in Japanese elementary schools.',
