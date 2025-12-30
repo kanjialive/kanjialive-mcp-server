@@ -21,6 +21,9 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 // Session storage for stateful connections
 const sessions: Map<string, StreamableHTTPServerTransport> = new Map();
 
+// Create the MCP server once at startup
+const mcpServer = createMCPServer();
+
 /**
  * Validate environment on startup.
  */
@@ -101,8 +104,7 @@ app.post('/mcp', async (c) => {
         }
       };
 
-      const server = createMCPServer();
-      await server.connect(transport);
+      await mcpServer.connect(transport);
     } else {
       // Invalid request - no session for non-init request
       return c.json(
