@@ -102,18 +102,24 @@ function createMockResponse(): {
     return mock;
   };
 
-  mock.write = (chunk: string | Buffer) => {
-    responseChunks.push(chunk.toString());
+  mock.write = (chunk: string | Buffer | Uint8Array) => {
+    if (chunk instanceof Uint8Array) {
+      responseChunks.push(new TextDecoder().decode(chunk));
+    } else {
+      responseChunks.push(chunk.toString());
+    }
     return true;
   };
 
   mock.end = (
-    data?: string | Buffer | (() => void),
+    data?: string | Buffer | Uint8Array | (() => void),
     encoding?: BufferEncoding | (() => void),
     callback?: () => void
   ) => {
     if (typeof data === 'function') {
       data();
+    } else if (data instanceof Uint8Array) {
+      responseChunks.push(new TextDecoder().decode(data));
     } else if (data) {
       responseChunks.push(data.toString());
     }
