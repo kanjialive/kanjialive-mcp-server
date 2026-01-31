@@ -6,7 +6,7 @@ Two Model Context Protocol (MCP) servers that provide access to the [Kanji Alive
 
 This repository provides **two MCP server implementations**:
 
-- **Hosted (HTTP):** TypeScript-based server (`ka-mcp-hosted/`) for remote access (no installation required)
+- **Hosted (HTTP):** TypeScript-based server (`https://kanjialive-mcp-server-production.up.railway.app/mcp`) for remote access (no installation required)
 - **Local (stdio):** Python-based server (`ka-mcp-local/`) for local MCP clients like Claude Desktop, ChatGPT, or MSTY (requires local installation)
 
 Both servers enable you to search and retrieve detailed information about 1,235 kanji supported by Kanji alive, including by:
@@ -20,16 +20,14 @@ Both servers enable you to search and retrieve detailed information about 1,235 
 
 ## Prerequisites
 
+**For Remote Server:**
+- An MCP compatible LLM client like Claude Desktop or claude.ai
+- Enter `https://kanjialive-mcp-server-production.up.railway.app/mcp` as the remote MCP server name
+- No authentication is needed
+
 **For Local Server (Python):**
 - Python 3.10 or higher
 - [uv](https://docs.astral.sh/uv/) package manager
-- An MCP-compatible client ([Claude Desktop](https://claude.ai/download) recommended)
-
-**For Hosted Server (TypeScript):**
-- Node.js 18+ and npm
-- Railway.com account (or other hosting platform)
-
-**Both servers require:**
 - A RapidAPI key (free tier available)
 
 ## Installation
@@ -47,7 +45,6 @@ Both servers enable you to search and retrieve detailed information about 1,235 
 git clone https://github.com/BoQsc/kanjialive-mcp-server.git
 cd kanjialive-mcp-server
 ```
-
 ### 3. Install Dependencies
 
 **For Local Python Server:**
@@ -56,15 +53,7 @@ cd kanjialive-mcp-server
 cd ka-mcp-local
 uv sync
 ```
-
 This creates a `.venv` virtual environment and installs all dependencies from the lock file.
-
-**For Hosted TypeScript Server:**
-
-```bash
-cd ka-mcp-hosted
-npm install
-```
 
 ### 4. Configure API Key
 
@@ -84,8 +73,6 @@ $env:RAPIDAPI_KEY="your_api_key_here"
 ```
 
 ### 5. Configure Your MCP Client
-
-#### Local Server (Claude Desktop)
 
 Add the server to your configuration file:
 
@@ -109,29 +96,9 @@ Add the server to your configuration file:
 
 Replace `/path/to/kanjialive-mcp-server` with the actual path to this directory.
 
-#### Hosted Server (HTTP)
-
-Deploy the TypeScript server to Railway.com or another hosting platform:
-
-```bash
-cd ka-mcp-hosted
-npm run build
-npm start
-```
-
-The server will be available at `https://your-domain.com/mcp`. Configure your MCP client to use this HTTP endpoint.
-
 ### 6. Restart Your Client
 
 Restart your MCP client for changes to take effect.
-
-#### Claude Desktop Permissions
-
-After restarting, the server appears in **Settings → Connectors → Kanji Alive**. You can set permissions to:
-
-- **Always Allow** - Tools run without confirmation
-- **Needs Approval** - Prompts before each tool use
-- **Blocked** - Claude Desktop won't see the server (tools unavailable)
 
 ## Usage
 
@@ -163,7 +130,7 @@ The server provides three MCP tools:
 2. **kanjialive_search_advanced** - Complex searches with multiple filters (stroke count, grade, radical, study list, etc.)
 3. **kanjialive_get_kanji_details** - Comprehensive information for a specific kanji including stroke order video and example audio
 
-And two (draft) MCP resources for reference data:
+Two (draft) MCP resources for reference data:
 
 - `kanjialive://info/radical-positions` - Valid radical position codes
 - `kanjialive://info/search-parameters` - Advanced search parameter documentation
