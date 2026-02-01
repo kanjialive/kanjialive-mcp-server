@@ -130,10 +130,9 @@ The server provides three MCP tools:
 2. **kanjialive_search_advanced** - Complex searches with multiple filters (stroke count, grade, radical, study list, etc.)
 3. **kanjialive_get_kanji_details** - Comprehensive information for a specific kanji including stroke order video and example audio
 
-Two (draft) MCP resources for reference data:
+One MCP resource for reference data:
 
 - `kanjialive://info/radical-positions` - Valid radical position codes
-- `kanjialive://info/search-parameters` - Advanced search parameter documentation
 
 ### Features
 
