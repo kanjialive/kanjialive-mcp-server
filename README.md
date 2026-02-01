@@ -17,6 +17,8 @@ Both servers enable you to search and retrieve detailed information about 1,235 
 - Example words with translations and audio (mp3)
 - Stroke order animation videos (mp4)
 - Dictionary references
+  
+Users can also optionally add detailed information on the [214 traditional kanji radicals](https://kanjialive.com/214-traditional-kanji-radicals/) to the context of their chat.
 
 ## Prerequisites
 
@@ -132,7 +134,7 @@ The server provides three MCP tools:
 
 One MCP resource for reference data:
 
-- `kanjialive://info/radical-positions` - Valid radical position codes
+- `kanjialive://info/radical-positions` - Detailed information on the [214 traditional kanji radicals](https://kanjialive.com/214-traditional-kanji-radicals/)
 
 ### Features
 
