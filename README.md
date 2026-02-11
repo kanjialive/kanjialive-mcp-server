@@ -14,43 +14,19 @@ https://kanjialive-mcp-server-production.up.railway.app/mcp
 
 That's it. You can now ask your AI assistant things like:
 
+- "Look up the kanji 親"
 - "Find kanji that mean 'parent'"
-- "Search for kanji with the reading シン"
-- "Get detailed information about the kanji 見"
-- "Find all 5-stroke kanji taught in grade 1"
-- "Show me kanji using the 'fire' radical"
-- "Search for kanji in the AP Exam study list"
+- "Search for kanji with the onyomi reading シン"
+- "Show me kanji with the kunyomi reading おや"
+- "Get detailed information about the kanji 見, including stroke order and examples"
+- "Find all kanji with 5 strokes that are taught in grade 1"
+- "Show me kanji that use the 'fire' radical"
+- "Find kanji where the radical has 7 strokes"
+- "Show me kanji with the radical in the hen (left) position"
+- "What kanji are in the AP Exam study list, chapter 3?"
+- "Tell me about the 214 traditional kanji radicals"
 
-## What You Can Look Up
-
-The server provides three tools and one reference resource:
-
-| Tool | What it does |
-|------|-------------|
-| **Basic search** | Search by a single term: kanji character, reading, or English meaning |
-| **Advanced search** | Filter by multiple criteria: readings, meanings, stroke counts, radicals, grade levels, study lists |
-| **Kanji details** | Full information for a kanji: readings, radical, stroke order video, example words with audio |
-| **Radicals reference** | The [214 traditional kanji radicals](https://kanjialive.com/214-traditional-kanji-radicals/) with position variants (321 entries) |
-
-Both romaji and Japanese scripts are accepted as input. For example, you can search by onyomi using either `shin` or `シン`, and by kunyomi using either `oya` or `おや`.
-
-### Advanced Search Filters
-
-All parameters are optional, but at least one must be provided:
-
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `on` | Onyomi reading (romaji or katakana) | `shin` or `シン` |
-| `kun` | Kunyomi reading (romaji or hiragana) | `oya` or `おや` |
-| `kem` | Kanji English meaning | `parent` |
-| `ks` | Kanji stroke count (1-30) | `16` |
-| `kanji` | Kanji character | `親` |
-| `rjn` | Radical Japanese name (romaji or hiragana) | `miru` or `みる` |
-| `rem` | Radical English meaning | `see` |
-| `rs` | Radical stroke count (1-17) | `7` |
-| `rpos` | Radical position | `hen` or `へん` |
-| `grade` | School grade level (1-6) | `2` |
-| `list` | Study list | `ap`, `ap:c3`, `mac:c12` |
+You can use either romaji or Japanese script — "shin" and "シン" both work, as do "oya" and "おや".
 
 ---
 
@@ -145,6 +121,24 @@ PYTHONPATH=ka-mcp-local uv run pytest extras/tests/test_validators.py -v
 ### Hosted Server Development
 
 See [`ka-mcp-hosted/README.md`](ka-mcp-hosted/README.md) for build, test, and deployment instructions for the TypeScript server.
+
+### Advanced Search API Parameters
+
+For developers working on the server or integrating directly, the advanced search tool accepts these filter parameters (all optional, at least one required):
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `on` | Onyomi reading (romaji or katakana) | `shin` or `シン` |
+| `kun` | Kunyomi reading (romaji or hiragana) | `oya` or `おや` |
+| `kem` | Kanji English meaning | `parent` |
+| `ks` | Kanji stroke count (1-30) | `16` |
+| `kanji` | Kanji character | `親` |
+| `rjn` | Radical Japanese name (romaji or hiragana) | `miru` or `みる` |
+| `rem` | Radical English meaning | `see` |
+| `rs` | Radical stroke count (1-17) | `7` |
+| `rpos` | Radical position | `hen` or `へん` |
+| `grade` | School grade level (1-6) | `2` |
+| `list` | Study list | `ap`, `ap:c3`, `mac:c12` |
 
 ## API Documentation
 
