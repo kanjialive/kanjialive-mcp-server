@@ -57,6 +57,7 @@ ka-mcp-hosted/coverage/
 *.tar.gz
 *.zip
 
-# Development files
+# Development files (already tracked; prevents new unreviewed files from being added)
+# To add new files under extras/, use: git add -f extras/path/to/file
 extras/
 CLAUDE.md

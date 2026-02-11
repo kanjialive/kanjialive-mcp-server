@@ -8,6 +8,7 @@ import { getKanjiDetail } from '../../api/client.js';
 import { KanjiDetailInputSchema } from '../../validators/kanjiDetail.js';
 import { formatKanjiDetailMarkdown } from '../../formatters/markdown.js';
 import { handleApiError, ToolError, validateApiResponse } from '../../utils/errors.js';
+import { formatZodError } from '../../utils/validation.js';
 import { logger } from '../../utils/logger.js';
 import type { KanjiDetail, RequestInfo } from '../../api/types.js';
 
@@ -21,19 +22,6 @@ export interface KanjiDetailsResult {
     text: string;
   }>;
   isError?: boolean;
-}
-
-/**
- * Format Zod validation errors into a readable string.
- */
-function formatZodError(error: unknown): string {
-  if (error && typeof error === 'object' && 'issues' in error) {
-    const zodError = error as { issues: Array<{ path: unknown[]; message: string }> };
-    return zodError.issues
-      .map((issue) => `${String(issue.path.join('.'))}: ${issue.message}`)
-      .join('; ');
-  }
-  return 'Validation error';
 }
 
 /**

@@ -7,6 +7,8 @@
 
 import 'dotenv/config';
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import { bodyLimit } from 'hono/body-limit';
 import { serve } from '@hono/node-server';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
@@ -32,7 +34,7 @@ const VERSION: string = packageJson.version;
  * Accepts UUID v4 format to prevent log injection and DoS via large values.
  */
 function isValidSessionId(id: string | undefined): id is string {
-  if (!id || id.length > 100) return false;
+  if (!id || id.length !== 36) return false;
   // UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
   return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 }
@@ -235,9 +237,63 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 
 // Session storage for stateful connections
 const sessions: Map<string, StreamableHTTPServerTransport> = new Map();
+const sessionLastAccess: Map<string, number> = new Map();
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const SESSION_CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
+
+/**
+ * Periodic cleanup of stale sessions.
+ * Removes sessions that haven't been accessed within SESSION_TIMEOUT_MS.
+ */
+const sessionCleanupInterval = setInterval(() => {
+  const now = Date.now();
+  for (const [id, lastAccess] of sessionLastAccess.entries()) {
+    if (now - lastAccess > SESSION_TIMEOUT_MS) {
+      const transport = sessions.get(id);
+      if (transport) {
+        transport.close().catch(() => {});
+      }
+      sessions.delete(id);
+      sessionLastAccess.delete(id);
+      logger.info('Session expired due to inactivity', { sessionId: id });
+    }
+  }
+}, SESSION_CLEANUP_INTERVAL_MS);
+
+// Prevent cleanup interval from keeping the process alive
+sessionCleanupInterval.unref();
 
 // Create the MCP server once at startup
 const mcpServer = createMCPServer();
+
+// CORS: allow browser-based MCP clients to connect
+app.use(
+  '/mcp',
+  cors({
+    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
+    allowMethods: ['GET', 'POST', 'DELETE'],
+    allowHeaders: ['Content-Type', 'mcp-session-id'],
+    exposeHeaders: ['mcp-session-id'],
+  })
+);
+
+// Body size limit: prevent memory exhaustion from oversized payloads
+app.use(
+  '/mcp',
+  bodyLimit({
+    maxSize: 1024 * 1024, // 1 MB
+    onError: (c) => {
+      return c.json(
+        {
+          jsonrpc: '2.0',
+          error: { code: -32600, message: 'Request body too large' },
+          id: null,
+        },
+        413
+      );
+    },
+  })
+);
 
 /**
  * Validate environment on startup.
@@ -318,6 +374,7 @@ app.post('/mcp', async (c) => {
     if (sessionId && sessions.has(sessionId)) {
       // Reuse existing session
       transport = sessions.get(sessionId)!;
+      sessionLastAccess.set(sessionId, Date.now());
       logger.debug('Reusing session', { sessionId });
     } else if (!sessionId && isInitializeRequest(body)) {
       // New session initialization
@@ -325,6 +382,7 @@ app.post('/mcp', async (c) => {
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (id) => {
           sessions.set(id, transport);
+          sessionLastAccess.set(id, Date.now());
           logger.info('Session initialized', { sessionId: id });
         },
       });
@@ -334,6 +392,7 @@ app.post('/mcp', async (c) => {
       transport.onclose = () => {
         if (transport.sessionId) {
           sessions.delete(transport.sessionId);
+          sessionLastAccess.delete(transport.sessionId);
           logger.info('Session closed', { sessionId: transport.sessionId });
         }
       };
@@ -500,6 +559,7 @@ app.delete('/mcp', async (c) => {
   try {
     await transport.close();
     sessions.delete(sessionId);
+    sessionLastAccess.delete(sessionId);
     logger.info('Session deleted', { sessionId });
     return c.json({ success: true });
   } catch (error) {
@@ -533,6 +593,8 @@ async function handleShutdown(signal: string): Promise<void> {
 
   await Promise.allSettled(closePromises);
   sessions.clear();
+  sessionLastAccess.clear();
+  clearInterval(sessionCleanupInterval);
   process.exit(0);
 }
 

@@ -76,7 +76,7 @@ def _load_radicals_data_from_file() -> Dict[str, Any]:
     if not radicals_file.exists():
         raise FileNotFoundError(
             f"Radicals data file not found: {radicals_file}. "
-            f"Run 'python scripts/convert_radicals_csv.py' to generate it."
+            f"Run 'python extras/scripts/convert_radicals_csv.py' to generate it."
         )
 
     try:
@@ -706,7 +706,7 @@ async def _make_api_request(
             # Track request metadata
             request_info = {
                 "endpoint": endpoint,
-                "params": params or {},
+                "params": dict(params) if params else {},
                 "timestamp": datetime.datetime.now().isoformat()
             }
 
@@ -722,7 +722,7 @@ async def _make_api_request(
                     if status == 429:
                         retry_after = e.response.headers.get("Retry-After")
                         if retry_after and retry_after.isdigit():
-                            delay = float(retry_after)
+                            delay = min(float(retry_after), max_backoff)
                             logger.warning(
                                 f"Rate limited (429). Retry-After header: {retry_after}s. "
                                 f"Waiting {delay}s before retry (attempt {attempt}/{max_retries})"

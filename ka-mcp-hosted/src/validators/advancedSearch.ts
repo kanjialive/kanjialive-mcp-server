@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod';
-import { normalizeJapaneseText } from '../utils/unicode.js';
+import { normalizeJapaneseText, validateNoControlChars } from '../utils/unicode.js';
 import {
   isKatakana,
   isHiragana,
@@ -25,7 +25,7 @@ import {
 const onyomiSchema = z
   .string()
   .optional()
-  .transform((v) => (v ? normalizeJapaneseText(v.trim()) : undefined))
+  .transform((v) => (v ? validateNoControlChars(normalizeJapaneseText(v.trim()), 'on') : undefined))
   .refine(
     (v) => {
       if (v === undefined) return true;
@@ -50,7 +50,7 @@ const onyomiSchema = z
 const hiraganaOrRomajiSchema = z
   .string()
   .optional()
-  .transform((v) => (v ? normalizeJapaneseText(v.trim()) : undefined))
+  .transform((v) => (v ? validateNoControlChars(normalizeJapaneseText(v.trim()), 'reading') : undefined))
   .refine(
     (v) => {
       if (v === undefined) return true;
@@ -75,7 +75,7 @@ const hiraganaOrRomajiSchema = z
 const radicalPositionSchema = z
   .string()
   .optional()
-  .transform((v) => (v ? v.trim().toLowerCase() : undefined))
+  .transform((v) => (v ? normalizeJapaneseText(v.trim()).toLowerCase() : undefined))
   .refine(
     (v) => {
       if (v === undefined) return true;

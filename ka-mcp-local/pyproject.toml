@@ -29,7 +29,7 @@ include = ["kanjialive_mcp.py"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["../extras/tests"]
 addopts = "--cov=kanjialive_mcp --cov-report=term-missing --cov-report=html"
 
 [tool.coverage.run]

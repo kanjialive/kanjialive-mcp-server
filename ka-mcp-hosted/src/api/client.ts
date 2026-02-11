@@ -97,8 +97,8 @@ function getRetryDelay(error: AxiosError, retryCount: number): number {
   const retryAfter = error.response?.headers?.['retry-after'];
 
   if (retryAfter && /^\d+$/.test(retryAfter)) {
-    const delay = parseInt(retryAfter, 10) * 1000;
-    logger.warn(`Rate limited (429). Using Retry-After: ${retryAfter}s`);
+    const delay = Math.min(parseInt(retryAfter, 10), MAX_BACKOFF) * 1000;
+    logger.warn(`Rate limited (429). Using Retry-After: ${retryAfter}s (capped to ${delay / 1000}s)`);
     return delay;
   }
 
@@ -185,17 +185,20 @@ function validateSearchResponse(data: unknown, endpoint: string): void {
       endpoint,
       responseType: typeof data,
     });
-    throw new Error(
-      `API returned unexpected format for search. ` +
-        `Expected list of results, got ${typeof data}`
-    );
+    const detail = process.env.NODE_ENV === 'production'
+      ? 'Invalid API response format'
+      : `API returned unexpected format for search. Expected list of results, got ${typeof data}`;
+    throw new Error(detail);
   }
 
   // Validate each result has required fields
   for (let idx = 0; idx < data.length; idx++) {
     const item = data[idx];
     if (typeof item !== 'object' || item === null) {
-      throw new Error(`Search result ${idx} is not a dictionary (got ${typeof item})`);
+      const detail = process.env.NODE_ENV === 'production'
+        ? 'Invalid API response format'
+        : `Search result ${idx} is not a dictionary (got ${typeof item})`;
+      throw new Error(detail);
     }
     if (!('kanji' in item)) {
       logger.warn(`Search result ${idx} missing 'kanji' field`, {
@@ -218,10 +221,10 @@ function validateKanjiDetailResponse(data: unknown, endpoint: string): void {
       endpoint,
       responseType: typeof data,
     });
-    throw new Error(
-      `API returned unexpected format for kanji details. ` +
-        `Expected dictionary, got ${typeof data}`
-    );
+    const detail = process.env.NODE_ENV === 'production'
+      ? 'Invalid API response format'
+      : `API returned unexpected format for kanji details. Expected dictionary, got ${typeof data}`;
+    throw new Error(detail);
   }
 
   // Check for required top-level fields

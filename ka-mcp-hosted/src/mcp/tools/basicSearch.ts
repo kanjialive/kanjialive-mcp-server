@@ -9,6 +9,7 @@ import { BasicSearchInputSchema } from '../../validators/basicSearch.js';
 import { formatSearchResultsMarkdown } from '../../formatters/markdown.js';
 import { createSearchMetadata } from '../../formatters/metadata.js';
 import { handleApiError, ToolError } from '../../utils/errors.js';
+import { formatZodError } from '../../utils/validation.js';
 import { logger } from '../../utils/logger.js';
 import type { SearchResponse, RequestInfo } from '../../api/types.js';
 
@@ -22,19 +23,6 @@ export interface BasicSearchResult {
     text: string;
   }>;
   isError?: boolean;
-}
-
-/**
- * Format Zod validation errors into a readable string.
- */
-function formatZodError(error: unknown): string {
-  if (error && typeof error === 'object' && 'issues' in error) {
-    const zodError = error as { issues: Array<{ path: unknown[]; message: string }> };
-    return zodError.issues
-      .map((issue) => `${String(issue.path.join('.'))}: ${issue.message}`)
-      .join('; ');
-  }
-  return 'Validation error';
 }
 
 /**
