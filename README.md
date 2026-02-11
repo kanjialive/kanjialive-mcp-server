@@ -4,7 +4,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that l
 
 ## Quick Start (Hosted Server)
 
-The fastest way to use Kanji Alive is through the hosted server. No installation, no configuration.
+The fastest way to use this is through the hosted server. No installation, no configuration.
 
 **In your MCP client** (Claude Desktop, claude.ai, ChatGPT, MSTY, etc.), add a new remote MCP server with this URL:
 
