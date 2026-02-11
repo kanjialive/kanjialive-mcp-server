@@ -4,7 +4,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that l
 
 ## Quick Start (Hosted Server)
 
-The fastest way to use Kanji Alive is through the hosted server. No installation, no API key, no configuration.
+The fastest way to use Kanji Alive is through the hosted server. No installation, no configuration.
 
 **In your MCP client** (Claude Desktop, claude.ai, ChatGPT, MSTY, etc.), add a new remote MCP server with this URL:
 
@@ -12,7 +12,7 @@ The fastest way to use Kanji Alive is through the hosted server. No installation
 https://kanjialive-mcp-server-production.up.railway.app/mcp
 ```
 
-That's it. You can now ask your AI assistant things like:
+That's it. You can now ask your AI assistant to draw on its knowledge of [Kanji alive](https://kanjialive.com) to answer questions like:
 
 - "Look up the kanji 親"
 - "Find kanji that mean 'parent'"
@@ -147,7 +147,7 @@ For developers working on the server or integrating directly, the advanced searc
 
 ## Credit
 
-Arno Bosse and Claude Code.
+Arno Bosse and [Claude Code](https://claude.ai/claude-code) (Anthropic).
 
 ## License
 
