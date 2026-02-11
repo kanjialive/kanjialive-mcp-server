@@ -36,8 +36,3 @@ export const INITIAL_BACKOFF = 0.5;
  * Maximum delay for exponential backoff (in seconds).
  */
 export const MAX_BACKOFF = 30;
-
-/**
- * HTTP status codes that should trigger a retry.
- */
-export const RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504];

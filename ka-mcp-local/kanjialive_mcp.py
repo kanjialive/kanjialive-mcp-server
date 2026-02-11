@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 import datetime
+import os
 import random
 import re
 import sys
@@ -39,11 +40,6 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 # Constants
 API_BASE_URL = "https://kanjialive-api.p.rapidapi.com/api/public"
 REQUEST_TIMEOUT = 30.0
-
-# RapidAPI Configuration
-# IMPORTANT: Set your RapidAPI key via environment variable or replace the default value
-# Get your free API key at: https://rapidapi.com/KanjiAlive/api/learn-to-read-and-write-japanese-kanji
-import os
 RAPIDAPI_HOST = "kanjialive-api.p.rapidapi.com"
 USER_AGENT = "kanjialive-mcp/1.0 (+https://github.com/kanjialive-mcp-server)"
 
@@ -113,9 +109,6 @@ def _get_radicals_cache() -> Dict[str, Any]:
     return _RADICALS_CACHE
 
 
-# ============================================================================
-# Application Lifespan Context
-# ============================================================================
 
 @dataclass
 class AppContext:
@@ -330,9 +323,6 @@ def _is_kanji_character(char: str) -> bool:
     return False
 
 
-# ============================================================================
-# Pydantic Input Models
-# ============================================================================
 
 class KanjiBasicSearchInput(BaseModel):
     """Input model for basic kanji search."""
@@ -388,7 +378,7 @@ class KanjiAdvancedSearchInput(BaseModel):
     )
     ks: Optional[int] = Field(
         default=None,
-        description="Kanji stroke number (1-22)",
+        description="Kanji stroke number (1-30)",
         ge=1,
         le=30
     )
@@ -408,7 +398,7 @@ class KanjiAdvancedSearchInput(BaseModel):
     )
     rs: Optional[int] = Field(
         default=None,
-        description="Radical stroke number (1-14)",
+        description="Radical stroke number (1-17)",
         ge=1,
         le=17
     )
@@ -573,10 +563,9 @@ class KanjiAdvancedSearchInput(BaseModel):
 
     def has_any_filter(self) -> bool:
         """Check if any search filter is provided."""
-        return any([
-            self.on, self.kun, self.kem, self.ks, self.kanji,
-            self.rjn, self.rem, self.rs, self.rpos, self.grade, self.list
-        ])
+        fields = [self.on, self.kun, self.kem, self.ks, self.kanji,
+                  self.rjn, self.rem, self.rs, self.rpos, self.grade, self.list]
+        return any(f is not None for f in fields)
 
 
 class KanjiDetailInput(BaseModel):
@@ -630,9 +619,6 @@ class SearchResultMetadata(BaseModel):
         )
 
 
-# ============================================================================
-# Structured Output Models
-# ============================================================================
 
 class KanjiSearchOutput(BaseModel):
     """Structured output for kanji search tools."""
@@ -652,9 +638,22 @@ class KanjiDetailOutput(BaseModel):
     kanji: Dict[str, Any] = Field(description="Complete kanji data including readings, radical, examples")
 
 
-# ============================================================================
-# Shared Utility Functions
-# ============================================================================
+
+def _jittered_delay(backoff: float, max_backoff: float) -> float:
+    """
+    Calculate a delay with 0-10% jitter, capped at max_backoff.
+
+    Args:
+        backoff: Current backoff value in seconds
+        max_backoff: Maximum allowed delay in seconds
+
+    Returns:
+        Delay in seconds
+    """
+    base = min(backoff, max_backoff)
+    jitter = random.uniform(0, base * 0.1)
+    return min(base + jitter, max_backoff)
+
 
 async def _make_api_request(
     client: httpx.AsyncClient,
@@ -682,7 +681,6 @@ async def _make_api_request(
     """
     url = f"{API_BASE_URL}/{endpoint}"
 
-    # Retry configuration
     max_retries = 3
     backoff = 0.5  # Initial backoff in seconds
     max_backoff = 30.0  # Maximum backoff cap in seconds
@@ -696,14 +694,12 @@ async def _make_api_request(
 
             response_data = response.json()
 
-            # Validate response structure
             try:
                 _validate_search_response(response_data, endpoint)
             except ValueError as ve:
                 logger.error(f"Response validation failed: {ve}")
                 raise
 
-            # Track request metadata
             request_info = {
                 "endpoint": endpoint,
                 "params": dict(params) if params else {},
@@ -714,65 +710,51 @@ async def _make_api_request(
 
         except httpx.HTTPStatusError as e:
             status = e.response.status_code
-            # Retry on rate limiting (429) and server errors (5xx)
             if status == 429 or 500 <= status < 600:
                 last_exception = e
                 if attempt < max_retries:
-                    # Honor Retry-After header for rate limiting
+                    # Honor Retry-After header for 429 rate limiting
                     if status == 429:
                         retry_after = e.response.headers.get("Retry-After")
                         if retry_after and retry_after.isdigit():
                             delay = min(float(retry_after), max_backoff)
                             logger.warning(
-                                f"Rate limited (429). Retry-After header: {retry_after}s. "
-                                f"Waiting {delay}s before retry (attempt {attempt}/{max_retries})"
+                                f"Rate limited (429). Retry-After: {retry_after}s, "
+                                f"waiting {delay}s (attempt {attempt}/{max_retries})"
                             )
                         else:
-                            # Apply jitter and cap to backoff
-                            base = min(backoff, max_backoff)
-                            jitter = random.uniform(0, base * 0.1)
-                            delay = min(base + jitter, max_backoff)
+                            delay = _jittered_delay(backoff, max_backoff)
                             logger.warning(
                                 f"Rate limited (429), no Retry-After header. "
-                                f"Using exponential backoff with jitter: {delay:.2f}s (attempt {attempt}/{max_retries})"
+                                f"Backoff: {delay:.2f}s (attempt {attempt}/{max_retries})"
                             )
                     else:
-                        # Apply jitter and cap to backoff for server errors
-                        base = min(backoff, max_backoff)
-                        jitter = random.uniform(0, base * 0.1)
-                        delay = min(base + jitter, max_backoff)
+                        delay = _jittered_delay(backoff, max_backoff)
                         logger.warning(
                             f"Server error {status}, "
                             f"retrying in {delay:.2f}s (attempt {attempt}/{max_retries})"
                         )
 
                     await asyncio.sleep(delay)
-                    backoff = min(backoff * 2, max_backoff)  # Cap backoff growth
+                    backoff = min(backoff * 2, max_backoff)
                     continue
-            # For other HTTP errors, don't retry
             raise
 
         except (httpx.RequestError, httpx.TimeoutException) as e:
             last_exception = e
             if attempt < max_retries:
-                # Apply jitter and cap to backoff for network errors
-                base = min(backoff, max_backoff)
-                jitter = random.uniform(0, base * 0.1)
-                delay = min(base + jitter, max_backoff)
+                delay = _jittered_delay(backoff, max_backoff)
                 logger.warning(
                     f"Network error: {type(e).__name__}, "
                     f"retrying in {delay:.2f}s (attempt {attempt}/{max_retries})"
                 )
                 await asyncio.sleep(delay)
-                backoff = min(backoff * 2, max_backoff)  # Cap backoff growth
+                backoff = min(backoff * 2, max_backoff)
                 continue
-            # If this was the last attempt, raise
             raise
 
-    # If we exhausted all retries, raise the last exception
     if last_exception:
         raise last_exception
-    # This fallback should never be reached, but include full context if it is
     raise httpx.HTTPError(
         f"Request failed after {max_retries} retries. "
         f"URL: {url}, params: {params}"
@@ -942,55 +924,28 @@ def _format_search_results_markdown(
     if not results:
         return "No kanji found matching your search criteria."
 
-    output = f"# Kanji Search Results\n\n"
-    
-    # Add completeness metadata section if available
+    output = "# Kanji Search Results\n\n"
+
     if metadata:
         output += metadata.to_markdown_header()
     else:
-        # Fallback if metadata not provided
         output += (
             f"## Result Information\n\n"
             f"- **Results Found:** {len(results)}\n\n"
         )
-    
-    # Main results table
-    # Note: Search API returns minimal data - only character, stroke count, and radical info
-    # Meaning, grade, and readings are only available via the detail endpoint
+
+    # Search API returns minimal data: character, stroke count, and radical info
     output += "| Kanji | Strokes | Radical | Rad. Strokes | Rad. # |\n"
     output += "|-------|---------|---------|--------------|--------|\n"
 
     for kanji in results:
         char = kanji.get('kanji', {}).get('character', '?')
         # Search API uses 'stroke' (singular) as direct integer
-        strokes_raw = kanji.get('kanji', {}).get('stroke')
-        if strokes_raw is None:
-            strokes = 'N/A'
-        elif isinstance(strokes_raw, int):
-            strokes = strokes_raw
-        else:
-            # Unexpected type - log warning and show N/A
-            logger.warning(
-                f"Unexpected strokes type in search result for '{char}'",
-                extra={"strokes_value": strokes_raw, "strokes_type": type(strokes_raw).__name__}
-            )
-            strokes = 'N/A'
+        strokes = kanji.get('kanji', {}).get('stroke', 'N/A')
 
-        # Get radical info - search API uses 'stroke' (singular)
         radical = kanji.get('radical', {})
         radical_char = radical.get('character', 'N/A')
-        radical_strokes_raw = radical.get('stroke')
-        if radical_strokes_raw is None:
-            radical_strokes = 'N/A'
-        elif isinstance(radical_strokes_raw, int):
-            radical_strokes = radical_strokes_raw
-        else:
-            logger.warning(
-                f"Unexpected radical strokes type for '{char}'",
-                extra={"strokes_value": radical_strokes_raw, "strokes_type": type(radical_strokes_raw).__name__}
-            )
-            radical_strokes = 'N/A'
-        # Radical order is the index in the 214 traditional kanji radicals
+        radical_strokes = radical.get('stroke', 'N/A')
         radical_order = radical.get('order', 'N/A')
 
         output += f"| {char} | {strokes} | {radical_char} | {radical_strokes} | {radical_order} |\n"
@@ -1013,30 +968,12 @@ def _format_kanji_detail_markdown(kanji: Dict[str, Any]) -> str:
     char = kanji.get('kanji', {}).get('character', '?')
     k_info = kanji.get('kanji', {})
     meaning = k_info.get('meaning', {}).get('english', 'N/A')
-    # Detail API uses 'strokes' as object with 'count', 'timings', 'images'
+    # Detail API strokes: object {count, timings, images} or integer (after filtering)
     strokes_raw = k_info.get('strokes')
-    if strokes_raw is None:
-        strokes = 'N/A'
-    elif isinstance(strokes_raw, dict):
-        stroke_count = strokes_raw.get('count')
-        if stroke_count is not None and isinstance(stroke_count, int):
-            strokes = stroke_count
-        else:
-            logger.warning(
-                f"Missing or invalid stroke count in detail response for '{char}'",
-                extra={"strokes_data": strokes_raw}
-            )
-            strokes = 'N/A'
-    elif isinstance(strokes_raw, int):
-        # Direct integer (legacy or simplified format)
-        strokes = strokes_raw
+    if isinstance(strokes_raw, dict):
+        strokes = strokes_raw.get('count', 'N/A')
     else:
-        logger.warning(
-            f"Unexpected strokes type in detail response for '{char}'",
-            extra={"strokes_value": strokes_raw, "strokes_type": type(strokes_raw).__name__}
-        )
-        strokes = 'N/A'
-    # Grade is in references object, not directly on kanji
+        strokes = strokes_raw if strokes_raw is not None else 'N/A'
     refs = kanji.get('references', {})
     grade = refs.get('grade', None)
 
@@ -1174,7 +1111,7 @@ def _extract_fields_from_results(results: List[Dict[str, Any]]) -> List[str]:
     for kanji in results:
         fields.update(kanji.keys())
     
-    return sorted(list(fields))
+    return sorted(fields)
 
 
 def _create_search_metadata(
@@ -1193,21 +1130,14 @@ def _create_search_metadata(
     Returns:
         SearchResultMetadata object with result information
     """
-    fields = _extract_fields_from_results(results)
-
-    metadata = SearchResultMetadata(
+    return SearchResultMetadata(
         results_returned=len(results),
-        fields_included=fields,
+        fields_included=_extract_fields_from_results(results),
         timestamp=request_info['timestamp'],
         query_parameters=query_params
     )
 
-    return metadata
 
-
-# ============================================================================
-# MCP Tools
-# ============================================================================
 
 @mcp.tool(
     name="kanjialive_search_basic",
@@ -1333,30 +1263,13 @@ async def kanjialive_search_advanced(params: KanjiAdvancedSearchInput, ctx: Cont
                 "For simple searches, use kanjialive_search_basic instead."
             )
 
-        # Build query parameters
-        query_params = {}
-        if params.on:
-            query_params['on'] = params.on
-        if params.kun:
-            query_params['kun'] = params.kun
-        if params.kem:
-            query_params['kem'] = params.kem
-        if params.ks is not None:
-            query_params['ks'] = params.ks
-        if params.kanji:
-            query_params['kanji'] = params.kanji
-        if params.rjn:
-            query_params['rjn'] = params.rjn
-        if params.rem:
-            query_params['rem'] = params.rem
-        if params.rs is not None:
-            query_params['rs'] = params.rs
-        if params.rpos:
-            query_params['rpos'] = params.rpos
-        if params.grade is not None:
-            query_params['grade'] = params.grade
-        if params.list:
-            query_params['list'] = params.list
+        # Build query parameters from all non-None fields
+        all_fields = ['on', 'kun', 'kem', 'ks', 'kanji', 'rjn', 'rem', 'rs', 'rpos', 'grade', 'list']
+        query_params = {
+            field: getattr(params, field)
+            for field in all_fields
+            if getattr(params, field) is not None
+        }
 
         await ctx.info(f"Advanced search: {query_params}")
         results, request_info = await _make_api_request(client, "search/advanced", params=query_params)
@@ -1432,19 +1345,10 @@ def _filter_kanji_detail_response(raw_data: Dict[str, Any]) -> Dict[str, Any]:
             kanji_filtered['meaning'] = kanji_raw['meaning']
 
         # strokes: API returns object {count, timings, images}, docs show integer
-        # Use None for missing/malformed data - 0 would be misleading since no kanji has 0 strokes
         if 'strokes' in kanji_raw:
             strokes = kanji_raw['strokes']
             if isinstance(strokes, dict):
-                stroke_count = strokes.get('count')
-                if stroke_count is not None:
-                    kanji_filtered['strokes'] = stroke_count
-                else:
-                    logger.warning(
-                        f"Missing stroke count in strokes object for kanji",
-                        extra={"strokes_data": strokes}
-                    )
-                    kanji_filtered['strokes'] = None
+                kanji_filtered['strokes'] = strokes.get('count')
             else:
                 kanji_filtered['strokes'] = strokes
 
@@ -1560,9 +1464,6 @@ async def kanjialive_get_kanji_details(params: KanjiDetailInput, ctx: Context) -
         _handle_api_error(e)
 
 
-# ============================================================================
-# MCP Resources
-# ============================================================================
 
 @mcp.resource("kanjialive://info/radicals")
 async def radicals_resource() -> str:
@@ -1605,9 +1506,6 @@ async def radicals_resource() -> str:
         }, ensure_ascii=False, indent=2)
 
 
-# ============================================================================
-# Server Entry Point
-# ============================================================================
 
 if __name__ == "__main__":
     # Configure logging

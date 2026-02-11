@@ -39,7 +39,7 @@ export function normalizeJapaneseText(text: string): string {
  * @throws Error if text contains control characters
  */
 export function validateNoControlChars(text: string, fieldName: string = 'input'): string {
-  // Check for null bytes explicitly (most dangerous)
+  // Check for null bytes explicitly for a more specific error message
   if (text.includes('\x00')) {
     throw new Error(
       `Invalid ${fieldName}: contains null byte (\\x00). ` +
@@ -49,17 +49,13 @@ export function validateNoControlChars(text: string, fieldName: string = 'input'
 
   for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i);
-    // C0 control codes (0x00-0x1F) except tab, newline, carriage return
-    if (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) {
+    const isC0Control = code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d;
+    const isC1Control = code >= 0x7f && code <= 0x9f;
+
+    if (isC0Control || isC1Control) {
+      const hex = code.toString(16).padStart(4, '0').toUpperCase();
       throw new Error(
-        `Invalid ${fieldName}: contains control character (U+${code.toString(16).padStart(4, '0').toUpperCase()}) at position ${i}. ` +
-          'Please use only printable characters.'
-      );
-    }
-    // C1 control codes (0x7F-0x9F)
-    if (code >= 0x7f && code <= 0x9f) {
-      throw new Error(
-        `Invalid ${fieldName}: contains control character (U+${code.toString(16).padStart(4, '0').toUpperCase()}) at position ${i}. ` +
+        `Invalid ${fieldName}: contains control character (U+${hex}) at position ${i}. ` +
           'Please use only printable characters.'
       );
     }

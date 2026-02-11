@@ -35,8 +35,32 @@ const VERSION: string = packageJson.version;
  */
 function isValidSessionId(id: string | undefined): id is string {
   if (!id || id.length !== 36) return false;
-  // UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
   return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+}
+
+/**
+ * Create a JSON-RPC 2.0 error response object.
+ */
+function jsonRpcError(code: number, message: string, id: unknown = null): object {
+  return { jsonrpc: '2.0', error: { code, message }, id };
+}
+
+/**
+ * Look up a validated, existing session transport.
+ * Returns the transport if found, or a Response with the appropriate JSON-RPC
+ * error if the session ID is invalid or unknown.
+ */
+function getSessionTransport(
+  sessionId: string | undefined,
+  c: { json: (data: object, status: number) => Response }
+): StreamableHTTPServerTransport | Response {
+  if (!isValidSessionId(sessionId)) {
+    return c.json(jsonRpcError(-32600, 'Invalid or missing session ID'), 400);
+  }
+  if (!sessions.has(sessionId)) {
+    return c.json(jsonRpcError(-32000, 'Session not found'), 400);
+  }
+  return sessions.get(sessionId)!;
 }
 
 /**
@@ -264,7 +288,7 @@ const sessionCleanupInterval = setInterval(() => {
 sessionCleanupInterval.unref();
 
 // Create the MCP server once at startup
-const mcpServer = createMCPServer();
+const mcpServer = createMCPServer(VERSION);
 
 // CORS: allow browser-based MCP clients to connect
 app.use(
@@ -354,17 +378,7 @@ app.post('/mcp', async (c) => {
 
   // Validate session ID format if provided (prevents log injection, DoS)
   if (sessionId && !isValidSessionId(sessionId)) {
-    return c.json(
-      {
-        jsonrpc: '2.0',
-        error: {
-          code: -32600,
-          message: 'Invalid session ID format',
-        },
-        id: null,
-      },
-      400
-    );
+    return c.json(jsonRpcError(-32600, 'Invalid session ID format'), 400);
   }
 
   try {
@@ -399,16 +413,8 @@ app.post('/mcp', async (c) => {
 
       await mcpServer.connect(transport);
     } else {
-      // Invalid request - no session for non-init request
       return c.json(
-        {
-          jsonrpc: '2.0',
-          error: {
-            code: -32000,
-            message: 'Invalid session. Send an initialize request without mcp-session-id to start.',
-          },
-          id: null,
-        },
+        jsonRpcError(-32000, 'Invalid session. Send an initialize request without mcp-session-id to start.'),
         400
       );
     }
@@ -435,18 +441,7 @@ app.post('/mcp', async (c) => {
       sessionId,
     });
 
-    // requestId was captured from the first parse (if successful)
-    return c.json(
-      {
-        jsonrpc: '2.0',
-        error: {
-          code: -32603,
-          message: 'Internal server error',
-        },
-        id: requestId,
-      },
-      500
-    );
+    return c.json(jsonRpcError(-32603, 'Internal server error', requestId), 500);
   }
 });
 
@@ -454,40 +449,11 @@ app.post('/mcp', async (c) => {
  * MCP endpoint - handles GET requests for SSE streams.
  */
 app.get('/mcp', async (c) => {
-  const sessionId = c.req.header('mcp-session-id');
+  const result = getSessionTransport(c.req.header('mcp-session-id'), c);
+  if (result instanceof Response) return result;
+  const transport = result;
+  const sessionId = c.req.header('mcp-session-id')!;
 
-  // Validate session ID format and existence
-  if (!isValidSessionId(sessionId)) {
-    return c.json(
-      {
-        jsonrpc: '2.0',
-        error: {
-          code: -32600,
-          message: 'Invalid or missing session ID',
-        },
-        id: null,
-      },
-      400
-    );
-  }
-
-  if (!sessions.has(sessionId)) {
-    return c.json(
-      {
-        jsonrpc: '2.0',
-        error: {
-          code: -32000,
-          message: 'Session not found',
-        },
-        id: null,
-      },
-      400
-    );
-  }
-
-  const transport = sessions.get(sessionId)!;
-
-  // Handle SSE request
   try {
     const headersObj = Object.fromEntries(c.req.raw.headers.entries());
     const mockReq = createMockRequest(c.req.method, c.req.path, headersObj);
@@ -505,17 +471,7 @@ app.get('/mcp', async (c) => {
       error: error instanceof Error ? error.message : String(error),
       sessionId,
     });
-    return c.json(
-      {
-        jsonrpc: '2.0',
-        error: {
-          code: -32603,
-          message: 'Internal server error',
-        },
-        id: null,
-      },
-      500
-    );
+    return c.json(jsonRpcError(-32603, 'Internal server error'), 500);
   }
 });
 
@@ -523,38 +479,10 @@ app.get('/mcp', async (c) => {
  * MCP endpoint - handles DELETE requests to close sessions.
  */
 app.delete('/mcp', async (c) => {
-  const sessionId = c.req.header('mcp-session-id');
-
-  // Validate session ID format and existence
-  if (!isValidSessionId(sessionId)) {
-    return c.json(
-      {
-        jsonrpc: '2.0',
-        error: {
-          code: -32600,
-          message: 'Invalid or missing session ID',
-        },
-        id: null,
-      },
-      400
-    );
-  }
-
-  if (!sessions.has(sessionId)) {
-    return c.json(
-      {
-        jsonrpc: '2.0',
-        error: {
-          code: -32000,
-          message: 'Session not found',
-        },
-        id: null,
-      },
-      400
-    );
-  }
-
-  const transport = sessions.get(sessionId)!;
+  const result = getSessionTransport(c.req.header('mcp-session-id'), c);
+  if (result instanceof Response) return result;
+  const transport = result;
+  const sessionId = c.req.header('mcp-session-id')!;
 
   try {
     await transport.close();

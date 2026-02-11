@@ -25,7 +25,7 @@ import type { RequestInfo, ApiResponse, SearchResponse, KanjiDetail } from './ty
  * @returns HTTP headers for RapidAPI requests
  * @throws Error if RAPIDAPI_KEY is not configured
  */
-function getApiHeaders(): Record<string, string> {
+export function getApiHeaders(): Record<string, string> {
   const key = process.env.RAPIDAPI_KEY;
 
   if (!key || key === 'YOUR_RAPIDAPI_KEY_HERE') {
@@ -65,25 +65,15 @@ function calculateBackoffDelay(retryCount: number): number {
  * @returns True if request should be retried
  */
 function shouldRetry(error: AxiosError): boolean {
-  // Always retry network errors on idempotent requests
   if (isNetworkOrIdempotentRequestError(error)) {
     return true;
   }
 
   const status = error.response?.status;
+  if (!status) return false;
 
-  // Retry on rate limiting (429)
-  if (status === 429) {
-    return true;
-  }
-
-  // Retry on server errors (5xx)
-  if (status && status >= 500 && status < 600) {
-    return true;
-  }
-
-  // Don't retry on client errors (4xx except 429)
-  return false;
+  // Retry on rate limiting (429) and server errors (5xx)
+  return status === 429 || (status >= 500 && status < 600);
 }
 
 /**
@@ -97,9 +87,14 @@ function getRetryDelay(error: AxiosError, retryCount: number): number {
   const retryAfter = error.response?.headers?.['retry-after'];
 
   if (retryAfter && /^\d+$/.test(retryAfter)) {
-    const delay = Math.min(parseInt(retryAfter, 10), MAX_BACKOFF) * 1000;
-    logger.warn(`Rate limited (429). Using Retry-After: ${retryAfter}s (capped to ${delay / 1000}s)`);
-    return delay;
+    const requestedSeconds = parseInt(retryAfter, 10);
+    const cappedSeconds = Math.min(requestedSeconds, MAX_BACKOFF);
+    const wasCapped = requestedSeconds > MAX_BACKOFF;
+    logger.warn(
+      `Rate limited (429). Retry-After: ${retryAfter}s` +
+        (wasCapped ? `, capped to ${cappedSeconds}s` : '')
+    );
+    return cappedSeconds * 1000;
   }
 
   return calculateBackoffDelay(retryCount);
@@ -283,5 +278,3 @@ export async function getKanjiDetail(
 
   return [response.data as KanjiDetail, requestInfo];
 }
-
-export { getApiHeaders };

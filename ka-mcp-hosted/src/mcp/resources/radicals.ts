@@ -5,9 +5,9 @@
  * and 107 position variants.
  */
 
-import fs from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { logger } from '../../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -35,12 +35,13 @@ async function loadRadicalsData(): Promise<Record<string, unknown>> {
 
   try {
     const data = await fs.readFile(radicalsFile, 'utf-8');
-    radicalsCache = JSON.parse(data);
+    const parsed = JSON.parse(data) as Record<string, unknown>;
+    radicalsCache = parsed;
     logger.debug('Loaded radicals data', {
-      totalEntries: (radicalsCache as Record<string, unknown>).total_entries ?? 0,
+      totalEntries: parsed.total_entries ?? 0,
       filePath: radicalsFile,
     });
-    return radicalsCache!;
+    return parsed;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new Error(

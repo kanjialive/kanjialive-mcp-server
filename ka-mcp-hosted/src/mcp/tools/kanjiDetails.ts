@@ -7,21 +7,26 @@
 import { getKanjiDetail } from '../../api/client.js';
 import { KanjiDetailInputSchema } from '../../validators/kanjiDetail.js';
 import { formatKanjiDetailMarkdown } from '../../formatters/markdown.js';
-import { handleApiError, ToolError, validateApiResponse } from '../../utils/errors.js';
+import { ToolError, validateApiResponse, toErrorResult } from '../../utils/errors.js';
+import type { ToolResult } from '../../utils/errors.js';
 import { formatZodError } from '../../utils/validation.js';
 import { logger } from '../../utils/logger.js';
-import type { KanjiDetail, RequestInfo } from '../../api/types.js';
+import type { KanjiDetail } from '../../api/types.js';
 
 /**
- * Result from executing the kanji details tool.
+ * Pick specified keys from an object, returning a new object with only those keys.
  */
-export interface KanjiDetailsResult {
-  [key: string]: unknown;
-  content: Array<{
-    type: 'text';
-    text: string;
-  }>;
-  isError?: boolean;
+function pickKeys(
+  source: Record<string, unknown>,
+  keys: string[]
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (key in source) {
+      result[key] = source[key];
+    }
+  }
+  return result;
 }
 
 /**
@@ -48,14 +53,7 @@ function filterKanjiDetailResponse(rawData: Record<string, unknown>): KanjiDetai
   // Extract and filter the 'kanji' object to documented fields only
   if (rawData.kanji && typeof rawData.kanji === 'object') {
     const kanjiRaw = rawData.kanji as Record<string, unknown>;
-    const kanjiFiltered: Record<string, unknown> = {};
-
-    if ('character' in kanjiRaw) {
-      kanjiFiltered.character = kanjiRaw.character;
-    }
-    if ('meaning' in kanjiRaw) {
-      kanjiFiltered.meaning = kanjiRaw.meaning;
-    }
+    const kanjiFiltered = pickKeys(kanjiRaw, ['character', 'meaning', 'onyomi', 'kunyomi', 'video']);
 
     // strokes: API returns object {count, timings, images}, docs show integer
     if ('strokes' in kanjiRaw) {
@@ -65,16 +63,6 @@ function filterKanjiDetailResponse(rawData: Record<string, unknown>): KanjiDetai
       } else {
         kanjiFiltered.strokes = strokes;
       }
-    }
-
-    if ('onyomi' in kanjiRaw) {
-      kanjiFiltered.onyomi = kanjiRaw.onyomi;
-    }
-    if ('kunyomi' in kanjiRaw) {
-      kanjiFiltered.kunyomi = kanjiRaw.kunyomi;
-    }
-    if ('video' in kanjiRaw) {
-      kanjiFiltered.video = kanjiRaw.video;
     }
 
     filtered.kanji = kanjiFiltered;
@@ -92,25 +80,11 @@ function filterKanjiDetailResponse(rawData: Record<string, unknown>): KanjiDetai
 
   // Extract examples array with only documented fields
   if (rawData.examples && Array.isArray(rawData.examples)) {
-    const filteredExamples: Array<Record<string, unknown>> = [];
-    for (const example of rawData.examples) {
-      if (typeof example === 'object' && example !== null) {
-        const ex = example as Record<string, unknown>;
-        const filteredExample: Record<string, unknown> = {};
-        if ('japanese' in ex) {
-          filteredExample.japanese = ex.japanese;
-        }
-        if ('meaning' in ex) {
-          filteredExample.meaning = ex.meaning;
-        }
-        if ('audio' in ex) {
-          filteredExample.audio = ex.audio;
-        }
-        if (Object.keys(filteredExample).length > 0) {
-          filteredExamples.push(filteredExample);
-        }
-      }
-    }
+    const filteredExamples = (rawData.examples as Array<Record<string, unknown>>)
+      .filter((ex): ex is Record<string, unknown> => typeof ex === 'object' && ex !== null)
+      .map((ex) => pickKeys(ex, ['japanese', 'meaning', 'audio']))
+      .filter((ex) => Object.keys(ex).length > 0);
+
     if (filteredExamples.length > 0) {
       filtered.examples = filteredExamples;
     }
@@ -127,9 +101,8 @@ function filterKanjiDetailResponse(rawData: Record<string, unknown>): KanjiDetai
  */
 export async function executeKanjiDetails(
   args: Record<string, unknown>
-): Promise<KanjiDetailsResult> {
+): Promise<ToolResult> {
   try {
-    // Validate input
     const parseResult = KanjiDetailInputSchema.safeParse(args);
     if (!parseResult.success) {
       throw new ToolError(`Validation error: ${formatZodError(parseResult.error)}`);
@@ -139,55 +112,20 @@ export async function executeKanjiDetails(
 
     logger.info('Get kanji details', { character });
 
-    // Make API request
-    const [rawData, requestInfo]: [KanjiDetail, RequestInfo] = await getKanjiDetail(character);
+    const [rawData] = await getKanjiDetail(character);
 
-    // Validate not empty
     validateApiResponse(rawData, `kanji '${character}'`);
 
     // Filter to documented fields only (removes internal DB fields, restricted data)
     const filteredData = filterKanjiDetailResponse(rawData as unknown as Record<string, unknown>);
-
-    // Format results
     const formattedResults = formatKanjiDetailMarkdown(filteredData);
 
     logger.info('Kanji details completed', { character });
 
     return {
-      content: [
-        {
-          type: 'text',
-          text: formattedResults,
-        },
-      ],
+      content: [{ type: 'text', text: formattedResults }],
     };
   } catch (error) {
-    if (error instanceof ToolError) {
-      return {
-        content: [{ type: 'text', text: error.message }],
-        isError: true,
-      };
-    }
-
-    // Log and transform other errors
-    logger.error('Kanji details error', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-
-    // handleApiError throws ToolError - catch it and return proper MCP response
-    try {
-      handleApiError(error);
-    } catch (toolError) {
-      return {
-        content: [{ type: 'text', text: toolError instanceof ToolError ? toolError.message : 'An unexpected error occurred' }],
-        isError: true,
-      };
-    }
-
-    // Fallback (should never reach here)
-    return {
-      content: [{ type: 'text', text: 'An unexpected error occurred' }],
-      isError: true,
-    };
+    return toErrorResult(error, 'Kanji details');
   }
 }

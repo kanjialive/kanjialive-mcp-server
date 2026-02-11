@@ -1,12 +1,24 @@
 /**
  * Error handling utilities for the MCP server.
  *
- * Provides custom error types and error mapping functions that translate
- * HTTP errors into user-friendly messages suitable for LLM consumption.
+ * Provides custom error types, error mapping functions, and shared result types
+ * that translate HTTP errors into user-friendly messages suitable for LLM consumption.
  */
 
 import { AxiosError } from 'axios';
 import { logger } from './logger.js';
+
+/**
+ * Standard result shape returned by all MCP tool implementations.
+ */
+export interface ToolResult {
+  [key: string]: unknown;
+  content: Array<{
+    type: 'text';
+    text: string;
+  }>;
+  isError?: boolean;
+}
 
 /**
  * Custom error class for tool execution failures.
@@ -142,4 +154,36 @@ export function validateApiResponse(data: unknown, queryInfo: string): void {
       `API returned null response for ${queryInfo}. ` + 'This may indicate a server error.'
     );
   }
+}
+
+/**
+ * Convert any caught error into a ToolResult with isError set.
+ *
+ * Handles the common pattern shared by all tool implementations:
+ * 1. If already a ToolError, use its message directly.
+ * 2. Otherwise, log the unexpected error and delegate to handleApiError.
+ *
+ * @param error - The caught error
+ * @param toolName - Name of the tool for logging context
+ * @returns A ToolResult indicating the error
+ */
+export function toErrorResult(error: unknown, toolName: string): ToolResult {
+  if (error instanceof ToolError) {
+    return { content: [{ type: 'text', text: error.message }], isError: true };
+  }
+
+  logger.error(`${toolName} error`, {
+    error: error instanceof Error ? error.message : String(error),
+  });
+
+  try {
+    handleApiError(error);
+  } catch (toolError) {
+    const message =
+      toolError instanceof ToolError ? toolError.message : 'An unexpected error occurred';
+    return { content: [{ type: 'text', text: message }], isError: true };
+  }
+
+  // handleApiError always throws, so this is unreachable but satisfies TypeScript
+  return { content: [{ type: 'text', text: 'An unexpected error occurred' }], isError: true };
 }

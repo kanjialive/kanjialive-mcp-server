@@ -5,9 +5,6 @@
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
 import { executeBasicSearch } from './tools/basicSearch.js';
 import { executeAdvancedSearch } from './tools/advancedSearch.js';
 import { executeKanjiDetails } from './tools/kanjiDetails.js';
@@ -33,27 +30,19 @@ import {
 } from './resources/radicals.js';
 import { logger } from '../utils/logger.js';
 
-// Load version from package.json to avoid duplication
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const packageJson = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf-8'));
-const VERSION: string = packageJson.version;
-
 /**
  * Create and configure the MCP server.
  *
+ * @param version - Server version string from package.json
  * @returns Configured McpServer instance
  */
-export function createMCPServer(): McpServer {
+export function createMCPServer(version: string): McpServer {
   const server = new McpServer({
     name: 'Kanji Alive',
-    version: VERSION,
+    version,
   });
 
-  // Register tools
   registerTools(server);
-
-  // Register resources
   registerResources(server);
 
   logger.info('MCP server configured', {
@@ -80,40 +69,28 @@ const TOOL_ANNOTATIONS = {
  * @param server - MCP server instance
  */
 function registerTools(server: McpServer): void {
-  // Basic search tool
   server.tool(
     BASIC_SEARCH_TOOL_NAME,
     BASIC_SEARCH_TOOL_DESCRIPTION,
     basicSearchParamsShape,
     TOOL_ANNOTATIONS,
-    async (args) => {
-      const result = await executeBasicSearch(args);
-      return result;
-    }
+    (args) => executeBasicSearch(args)
   );
 
-  // Advanced search tool
   server.tool(
     ADVANCED_SEARCH_TOOL_NAME,
     ADVANCED_SEARCH_TOOL_DESCRIPTION,
     advancedSearchParamsShape,
     TOOL_ANNOTATIONS,
-    async (args) => {
-      const result = await executeAdvancedSearch(args);
-      return result;
-    }
+    (args) => executeAdvancedSearch(args)
   );
 
-  // Kanji details tool
   server.tool(
     KANJI_DETAIL_TOOL_NAME,
     KANJI_DETAIL_TOOL_DESCRIPTION,
     kanjiDetailParamsShape,
     TOOL_ANNOTATIONS,
-    async (args) => {
-      const result = await executeKanjiDetails(args);
-      return result;
-    }
+    (args) => executeKanjiDetails(args)
   );
 
   logger.debug('Registered 3 MCP tools with annotations');
@@ -125,7 +102,6 @@ function registerTools(server: McpServer): void {
  * @param server - MCP server instance
  */
 function registerResources(server: McpServer): void {
-  // Radicals reference resource
   server.resource(
     radicalsResourceDefinition.name,
     radicalsResourceDefinition.uri,
@@ -133,13 +109,8 @@ function registerResources(server: McpServer): void {
       description: radicalsResourceDefinition.description,
       mimeType: radicalsResourceDefinition.mimeType,
     },
-    async () => {
-      const result = await readRadicalsResource();
-      return result;
-    }
+    () => readRadicalsResource()
   );
 
   logger.debug('Registered 1 MCP resource');
 }
-
-export { McpServer };
