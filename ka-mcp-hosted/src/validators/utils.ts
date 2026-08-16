@@ -4,6 +4,33 @@
  * Provides script detection, radical position maps, and reusable validation helpers.
  */
 
+import { z } from 'zod';
+
+/**
+ * Run a validator that reports failure by throwing, recording the thrown
+ * message as a Zod issue instead.
+ *
+ * Zod does not trap exceptions raised inside `.transform()`. Without this, a
+ * throw escapes `safeParse()` altogether and reaches the tool's catch-all as an
+ * opaque error, so the caller is told "an unexpected error occurred" rather than
+ * what was actually wrong with their input.
+ *
+ * @param ctx - Refinement context supplied to the transform
+ * @param run - Validator to execute
+ * @returns The validator's result, or z.NEVER if it threw
+ */
+export function issueOnThrow<T>(ctx: z.RefinementCtx, run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    ctx.addIssue({
+      code: 'custom',
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return z.NEVER;
+  }
+}
+
 /**
  * Valid radical positions in romaji (lowercase).
  */

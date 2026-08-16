@@ -4,6 +4,7 @@
 
 import { z } from 'zod';
 import { normalizeJapaneseText, validateNoControlChars } from '../utils/unicode.js';
+import { issueOnThrow } from './utils.js';
 
 /**
  * Zod shape for basic kanji search (for MCP SDK registration).
@@ -31,11 +32,16 @@ export const basicSearchParamsShape = {
  * - An English meaning (parent)
  */
 export const BasicSearchInputSchema = z.object({
+  // trim() precedes min(1) so a whitespace-only query is rejected rather than
+  // being reduced to "" after the length check has already passed.
   query: z
     .string({ message: 'Search query must be a string' })
+    .trim()
     .min(1, 'Search query cannot be empty')
     .max(100, 'Search query must be 100 characters or less')
-    .transform((v) => validateNoControlChars(normalizeJapaneseText(v.trim()), 'query')),
+    .transform((v, ctx) =>
+      issueOnThrow(ctx, () => validateNoControlChars(normalizeJapaneseText(v), 'query'))
+    ),
 });
 
 /**

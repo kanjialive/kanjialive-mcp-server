@@ -45,8 +45,12 @@ Two things to know when adding HTTP tests:
 - **Responses may be SSE.** Use the `parseRpc()` helper, which handles both a
   bare JSON body and an `event:`/`data:` frame.
 
-## Known defects
+## Not covered
 
-Three confirmed bugs are pinned by tests in `known defects` blocks so they cannot
-change unnoticed. See [`../KNOWN-ISSUES.md`](../KNOWN-ISSUES.md); fixing one means
-updating its test.
+- **The live upstream.** Every test stubs `src/api/client.ts`, so nothing here
+  asserts that the real Kanji Alive API still returns the shapes the formatters
+  expect. A breaking upstream change would pass CI.
+- **Concurrent server-initiated messages.** `app.ts` creates one `McpServer` at
+  startup and connects each session's transport to it. Request/response traffic
+  across concurrent sessions is covered; notifications and sampling across
+  simultaneous sessions are not.

@@ -232,28 +232,75 @@ describe('AdvancedSearchInputSchema', () => {
 });
 
 /**
- * Behaviour that is wrong but currently shipped. These tests pin the status quo
- * so a fix is a deliberate, visible change rather than an accidental one.
- * See KNOWN-ISSUES.md.
+ * Validators that report failure by throwing must still surface as ordinary
+ * validation issues; safeParse does not trap exceptions raised in a transform.
  */
-describe('known defects', () => {
-  it('KI-1: a throwing transform escapes safeParse instead of returning success:false', () => {
-    // Control-character rejection and study-list validation both throw inside a
-    // Zod .transform(), which safeParse does not trap. Callers that only check
-    // parseResult.success never see these messages.
-    expect(() => BasicSearchInputSchema.safeParse({ query: 'a\x00b' })).toThrow(/null byte/);
-    expect(() => BasicSearchInputSchema.safeParse({ query: 'a\x01b' })).toThrow(
-      /control character/
-    );
-    expect(() => AdvancedSearchInputSchema.safeParse({ list: 'gen' })).toThrow(
-      /Invalid study list/
+describe('throwing validators surface as issues, not exceptions', () => {
+  it('reports a null byte in the query as a validation failure', () => {
+    expect(() => BasicSearchInputSchema.safeParse({ query: 'a\x00b' })).not.toThrow();
+    expect(expectInvalid(BasicSearchInputSchema.safeParse({ query: 'a\x00b' }))).toMatch(
+      /null byte/
     );
   });
 
-  it('KI-2: a whitespace-only query passes validation and becomes empty', () => {
-    // min(1) runs before the trim in .transform(), so "   " survives the length
-    // check and is then reduced to "", producing a request to `search/`.
-    const data = expectValid(BasicSearchInputSchema.safeParse({ query: '   ' }));
-    expect(data.query).toBe('');
+  it('reports a control character in the query, naming the position', () => {
+    const message = expectInvalid(BasicSearchInputSchema.safeParse({ query: 'ab\x01' }));
+    expect(message).toMatch(/control character/);
+    expect(message).toMatch(/U\+0001/);
+  });
+
+  it('reports a control character in a kanji detail lookup', () => {
+    expect(() => KanjiDetailInputSchema.safeParse({ character: '\x01' })).not.toThrow();
+    expect(expectInvalid(KanjiDetailInputSchema.safeParse({ character: '\x01' }))).toMatch(
+      /control character/
+    );
+  });
+
+  it('reports an invalid study list with the list of valid values', () => {
+    expect(() => AdvancedSearchInputSchema.safeParse({ list: 'gen' })).not.toThrow();
+    const message = expectInvalid(AdvancedSearchInputSchema.safeParse({ list: 'gen' }));
+    expect(message).toMatch(/Invalid study list 'gen'/);
+    expect(message).toMatch(/'ap'/);
+    expect(message).toMatch(/'mac'/);
+  });
+
+  it('reports a malformed study list chapter', () => {
+    expect(expectInvalid(AdvancedSearchInputSchema.safeParse({ list: 'ap:3' }))).toMatch(
+      /Invalid chapter format/
+    );
+  });
+
+  it('reports control characters in advanced search readings', () => {
+    expect(expectInvalid(AdvancedSearchInputSchema.safeParse({ on: 'shin\x01' }))).toMatch(
+      /control character/
+    );
+    expect(expectInvalid(AdvancedSearchInputSchema.safeParse({ kun: 'oya\x00' }))).toMatch(
+      /null byte/
+    );
+  });
+
+  it('attaches the issue to the offending field', () => {
+    const result = BasicSearchInputSchema.safeParse({ query: 'a\x00b' });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0].path).toEqual(['query']);
+  });
+});
+
+describe('whitespace-only input', () => {
+  it('rejects a whitespace-only query rather than reducing it to empty', () => {
+    // trim() must precede min(1); otherwise "   " passes the length check and
+    // is then emptied, producing a request to the bare `search/` endpoint.
+    expect(expectInvalid(BasicSearchInputSchema.safeParse({ query: '   ' }))).toMatch(
+      /cannot be empty/
+    );
+    expect(expectInvalid(BasicSearchInputSchema.safeParse({ query: '\t\n ' }))).toMatch(
+      /cannot be empty/
+    );
+  });
+
+  it('still accepts a padded but non-empty query', () => {
+    expect(expectValid(BasicSearchInputSchema.safeParse({ query: '  water  ' })).query).toBe(
+      'water'
+    );
   });
 });

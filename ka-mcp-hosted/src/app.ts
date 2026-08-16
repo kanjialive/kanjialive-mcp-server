@@ -305,23 +305,22 @@ app.use(
   })
 );
 
+export const MAX_BODY_BYTES = 1024 * 1024; // 1 MB
+
+/** The 413 returned for an oversized request body. */
+function bodyTooLarge(c: { json: (data: object, status: 413) => Response }): Response {
+  return c.json(jsonRpcError(-32600, 'Request body too large'), 413);
+}
+
+/**
+ * hono/body-limit does not export BodyLimitError, so match the name it sets.
+ */
+function isBodyLimitError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'BodyLimitError';
+}
+
 // Body size limit: prevent memory exhaustion from oversized payloads
-app.use(
-  '/mcp',
-  bodyLimit({
-    maxSize: 1024 * 1024, // 1 MB
-    onError: (c) => {
-      return c.json(
-        {
-          jsonrpc: '2.0',
-          error: { code: -32600, message: 'Request body too large' },
-          id: null,
-        },
-        413
-      );
-    },
-  })
-);
+app.use('/mcp', bodyLimit({ maxSize: MAX_BODY_BYTES, onError: bodyTooLarge }));
 
 /**
  * Health check endpoint for Railway.
@@ -424,6 +423,14 @@ app.post('/mcp', async (c) => {
 
     return new Response(responseBody || '{}', { status, headers });
   } catch (error) {
+    // Without a Content-Length header, bodyLimit cannot reject up front; it caps
+    // the stream and surfaces the overflow here, when the body is read. Catching
+    // it locally would otherwise mask the middleware's 413 as a generic 500.
+    if (isBodyLimitError(error)) {
+      logger.warn('Request body exceeded limit', { maxBytes: MAX_BODY_BYTES, sessionId });
+      return bodyTooLarge(c);
+    }
+
     logger.error('MCP request error', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,

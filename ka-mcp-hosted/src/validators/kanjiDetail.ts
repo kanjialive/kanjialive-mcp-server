@@ -4,7 +4,7 @@
 
 import { z } from 'zod';
 import { normalizeJapaneseText, validateNoControlChars } from '../utils/unicode.js';
-import { isKanjiCharacter } from './utils.js';
+import { isKanjiCharacter, issueOnThrow } from './utils.js';
 
 /**
  * Zod shape for kanji detail (for MCP SDK registration).
@@ -25,7 +25,9 @@ export const KanjiDetailInputSchema = z.object({
   character: z
     .string({ message: 'Kanji character must be a string' })
     .length(1, 'Character must be a single kanji')
-    .transform((v) => validateNoControlChars(normalizeJapaneseText(v.trim()), 'character'))
+    .transform((v, ctx) =>
+      issueOnThrow(ctx, () => validateNoControlChars(normalizeJapaneseText(v.trim()), 'character'))
+    )
     .refine((v) => isKanjiCharacter(v), {
       message:
         'Invalid kanji character. Must be a CJK ideograph (e.g., 親, 見, 日). ' +

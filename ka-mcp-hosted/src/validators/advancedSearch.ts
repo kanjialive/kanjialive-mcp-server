@@ -16,6 +16,7 @@ import {
   VALID_RADICAL_POSITIONS,
   normalizeRadicalPosition,
   validateStudyList,
+  issueOnThrow,
 } from './utils.js';
 
 /**
@@ -25,7 +26,11 @@ import {
 const onyomiSchema = z
   .string()
   .optional()
-  .transform((v) => (v ? validateNoControlChars(normalizeJapaneseText(v.trim()), 'on') : undefined))
+  .transform((v, ctx) =>
+    v
+      ? issueOnThrow(ctx, () => validateNoControlChars(normalizeJapaneseText(v.trim()), 'on'))
+      : undefined
+  )
   .refine(
     (v) => {
       if (v === undefined) return true;
@@ -50,7 +55,11 @@ const onyomiSchema = z
 const hiraganaOrRomajiSchema = z
   .string()
   .optional()
-  .transform((v) => (v ? validateNoControlChars(normalizeJapaneseText(v.trim()), 'reading') : undefined))
+  .transform((v, ctx) =>
+    v
+      ? issueOnThrow(ctx, () => validateNoControlChars(normalizeJapaneseText(v.trim()), 'reading'))
+      : undefined
+  )
   .refine(
     (v) => {
       if (v === undefined) return true;
@@ -97,9 +106,9 @@ const radicalPositionSchema = z
 const studyListSchema = z
   .string()
   .optional()
-  .transform((v) => {
+  .transform((v, ctx) => {
     if (v === undefined || v === '') return undefined;
-    return validateStudyList(v);
+    return issueOnThrow(ctx, () => validateStudyList(v));
   });
 
 /**

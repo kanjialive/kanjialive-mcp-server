@@ -84,6 +84,21 @@ describe('executeBasicSearch', () => {
     expect(searchKanji).not.toHaveBeenCalled();
   });
 
+  it('explains a null byte instead of returning a generic error', async () => {
+    const result = await executeBasicSearch({ query: 'water\x00' });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toMatch(/null byte/);
+    expect(textOf(result)).not.toMatch(/unexpected error/);
+    expect(searchKanji).not.toHaveBeenCalled();
+  });
+
+  it('rejects a whitespace-only query instead of querying the bare endpoint', async () => {
+    const result = await executeBasicSearch({ query: '   ' });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toMatch(/cannot be empty/);
+    expect(searchKanji).not.toHaveBeenCalled();
+  });
+
   it('maps a 404 from the API to a helpful message', async () => {
     searchKanji.mockRejectedValue(httpError(404));
     const result = await executeBasicSearch({ query: 'water' });
@@ -143,6 +158,14 @@ describe('executeAdvancedSearch', () => {
     const result = await executeAdvancedSearch({ on: 'おや' });
     expect(result.isError).toBe(true);
     expect(textOf(result)).toMatch(/Invalid Onyomi reading/);
+  });
+
+  it('names the valid study lists when given an unsupported one', async () => {
+    const result = await executeAdvancedSearch({ list: 'gen' });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toMatch(/Invalid study list 'gen'/);
+    expect(textOf(result)).not.toMatch(/unexpected error/);
+    expect(searchKanji).not.toHaveBeenCalled();
   });
 });
 

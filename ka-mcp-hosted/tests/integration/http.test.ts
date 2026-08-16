@@ -520,15 +520,15 @@ describe('body limit', () => {
     expect(res.status).toBe(200);
   });
 
-  it('KI-3: an oversized body with no Content-Length reports 500, not 413', async () => {
-    // Without Content-Length, hono/body-limit cannot reject up front; it caps
-    // the stream instead and throws BodyLimitError when the handler reads the
-    // body. The route's own try/catch swallows that into a generic -32603, so
-    // the onError handler that would produce 413 never runs.
-    // Memory is still bounded - only the status code is wrong.
+  it('rejects an oversized chunked body with 413 as well', async () => {
+    // Without Content-Length, hono/body-limit caps the stream and raises
+    // BodyLimitError when the handler reads the body, so the route has to
+    // recognise it rather than fold it into a generic 500.
     const res = await post(OVERSIZED);
 
-    expect(res.status).toBe(500);
-    expect((await json(res)).error.code).toBe(-32603);
+    expect(res.status).toBe(413);
+    const body = await json(res);
+    expect(body.error.code).toBe(-32600);
+    expect(body.error.message).toMatch(/too large/i);
   });
 });
