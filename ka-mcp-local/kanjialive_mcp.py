@@ -35,7 +35,7 @@ from urllib.parse import quote
 import httpx
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.server.fastmcp.exceptions import ToolError
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, ConfigDict
 
 # Constants
 API_BASE_URL = "https://kanjialive-api.p.rapidapi.com/api/public"
@@ -297,6 +297,50 @@ def _validate_no_control_chars(text: str, field_name: str = "input") -> str:
     return text
 
 
+def _sanitize_text(value: str, field_name: str) -> str:
+    """
+    Strip, NFKC-normalize, and reject control characters in caller-supplied text.
+
+    Args:
+        value: Raw text from the caller
+        field_name: Name of the field for error messages
+
+    Returns:
+        The stripped, normalized text
+
+    Raises:
+        ValueError: If the normalized text contains control characters
+    """
+    return _validate_no_control_chars(_normalize_japanese_text(value.strip()), field_name)
+
+
+def _sanitize_optional_text(value: Optional[str], field_name: str) -> Optional[str]:
+    """
+    Sanitize an optional text field, collapsing empty input to None.
+
+    Every optional text field routes through this so that skipping sanitization
+    is a deliberate act rather than an omission — kem and rem previously opted
+    out by simply not calling it, and passed control characters through to the
+    API query string.
+
+    Returning None for empty-after-strip keeps a blank value out of the query
+    string, and stops has_any_filter() reporting a filter that is not there.
+
+    Args:
+        value: Raw text from the caller, or None
+        field_name: Name of the field for error messages
+
+    Returns:
+        The sanitized text, or None if absent or empty
+
+    Raises:
+        ValueError: If the normalized text contains control characters
+    """
+    if value is None:
+        return None
+    return _sanitize_text(value, field_name) or None
+
+
 def _is_kanji_character(char: str) -> bool:
     """
     Check if a character is a valid kanji (CJK ideograph).
@@ -349,10 +393,7 @@ class KanjiBasicSearchInput(BaseModel):
     @classmethod
     def validate_and_normalize_query(cls, v: str) -> str:
         """Validate and normalize query string."""
-        v = v.strip()
-        # Reject control characters (null bytes, etc.) before processing
-        _validate_no_control_chars(v, "query")
-        return _normalize_japanese_text(v)
+        return _sanitize_text(v, "query")
 
 
 class KanjiAdvancedSearchInput(BaseModel):
@@ -466,11 +507,9 @@ class KanjiAdvancedSearchInput(BaseModel):
     @classmethod
     def validate_onyomi(cls, v: Optional[str]) -> Optional[str]:
         """Validate Onyomi reading format (romaji or katakana only)."""
+        v = _sanitize_optional_text(v, 'on')
         if v is None:
             return v
-
-        # Normalize Unicode before validation
-        v = _normalize_japanese_text(v.strip())
 
         # Pattern for pure katakana (including middle dot, iteration marks)
         katakana_pattern = r'^[\u30A0-\u30FF\u30FB-\u30FE・]+$'
@@ -494,11 +533,9 @@ class KanjiAdvancedSearchInput(BaseModel):
     @classmethod
     def validate_hiragana_or_romaji(cls, v: Optional[str]) -> Optional[str]:
         """Validate Kunyomi/radical name format (romaji or hiragana only)."""
+        v = _sanitize_optional_text(v, 'reading')
         if v is None:
             return v
-
-        # Normalize Unicode before validation
-        v = _normalize_japanese_text(v.strip())
 
         # Pattern for pure hiragana (including iteration marks, small kana, dots for okurigana)
         hiragana_pattern = r'^[\u3040-\u309F\u3099-\u309C.・]+$'
@@ -522,10 +559,11 @@ class KanjiAdvancedSearchInput(BaseModel):
     @classmethod
     def validate_radical_position(cls, v: Optional[str]) -> Optional[str]:
         """Validate and normalize radical position."""
+        v = _sanitize_optional_text(v, 'rpos')
         if v is None:
             return v
 
-        v_lower = v.strip().lower()
+        v_lower = v.lower()
 
         if v_lower not in VALID_RADICAL_POSITIONS:
             raise ValueError(
@@ -539,18 +577,17 @@ class KanjiAdvancedSearchInput(BaseModel):
 
     @field_validator('kem', 'rem')
     @classmethod
-    def strip_whitespace(cls, v: Optional[str]) -> Optional[str]:
-        """Strip whitespace from English meaning fields."""
-        return v.strip() if v else v
+    def sanitize_english_meaning(cls, v: Optional[str], info: ValidationInfo) -> Optional[str]:
+        """Sanitize the English meaning fields."""
+        return _sanitize_optional_text(v, info.field_name or 'meaning')
 
     @field_validator('kanji')
     @classmethod
     def validate_kanji_character(cls, v: Optional[str]) -> Optional[str]:
         """Validate that the kanji field contains a valid kanji character."""
+        v = _sanitize_optional_text(v, 'kanji')
         if v is None:
             return v
-
-        v = _normalize_japanese_text(v.strip())
 
         if not _is_kanji_character(v):
             raise ValueError(
@@ -588,7 +625,7 @@ class KanjiDetailInput(BaseModel):
     @classmethod
     def validate_and_normalize_character(cls, v: str) -> str:
         """Validate and normalize kanji character."""
-        v = _normalize_japanese_text(v.strip())
+        v = _sanitize_text(v, "character")
 
         if not _is_kanji_character(v):
             raise ValueError(
