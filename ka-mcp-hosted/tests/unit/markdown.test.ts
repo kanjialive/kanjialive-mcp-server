@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { mockSearchResult, mockSearchResultRow } from '../helpers.js';
 import {
   escapeMarkdown,
   formatSearchResultsMarkdown,
@@ -36,7 +37,7 @@ describe('escapeMarkdown', () => {
 
 describe('formatSearchResultsMarkdown', () => {
   const results: SearchResponse = [
-    { kanji: { character: '水', stroke: 4 }, radical: { character: '⽔', stroke: 4, order: 109 } },
+    mockSearchResult,
     { kanji: { character: '湯', stroke: 12 }, radical: { character: '⺡', stroke: 3, order: 76 } },
   ];
 
@@ -50,7 +51,7 @@ describe('formatSearchResultsMarkdown', () => {
   it('renders a table row per result', () => {
     const out = formatSearchResultsMarkdown(results);
     expect(out).toContain('# Kanji Search Results');
-    expect(out).toContain('| 水 | 4 | ⽔ | 4 | 109 |');
+    expect(out).toContain(mockSearchResultRow);
     expect(out).toContain('| 湯 | 12 | ⺡ | 3 | 76 |');
     expect(out).toContain('**Total Results Shown:** 2');
   });

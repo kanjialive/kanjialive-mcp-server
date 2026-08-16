@@ -1,8 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-
-process.env.RAPIDAPI_KEY = 'test-key';
-
-const { createMockRequest, createMockResponse } = await import('../../src/app.js');
+import { createMockRequest, createMockResponse } from '../../src/http/nodeShims.js';
 
 describe('createMockRequest', () => {
   it('presents the shape of a Node IncomingMessage', () => {

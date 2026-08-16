@@ -6,7 +6,6 @@
  */
 
 import { z } from 'zod';
-import { normalizeJapaneseText, validateNoControlChars } from '../utils/unicode.js';
 import {
   isKatakana,
   isHiragana,
@@ -17,6 +16,8 @@ import {
   normalizeRadicalPosition,
   validateStudyList,
   issueOnThrow,
+  sanitizedText,
+  KANJI_CHARACTER_MESSAGE,
 } from './utils.js';
 
 /**
@@ -26,11 +27,7 @@ import {
 const onyomiSchema = z
   .string()
   .optional()
-  .transform((v, ctx) =>
-    v
-      ? issueOnThrow(ctx, () => validateNoControlChars(normalizeJapaneseText(v.trim()), 'on'))
-      : undefined
-  )
+  .transform(sanitizedText('on'))
   .refine(
     (v) => {
       if (v === undefined) return true;
@@ -55,11 +52,7 @@ const onyomiSchema = z
 const hiraganaOrRomajiSchema = z
   .string()
   .optional()
-  .transform((v, ctx) =>
-    v
-      ? issueOnThrow(ctx, () => validateNoControlChars(normalizeJapaneseText(v.trim()), 'reading'))
-      : undefined
-  )
+  .transform(sanitizedText('reading'))
   .refine(
     (v) => {
       if (v === undefined) return true;
@@ -84,7 +77,8 @@ const hiraganaOrRomajiSchema = z
 const radicalPositionSchema = z
   .string()
   .optional()
-  .transform((v) => (v ? normalizeJapaneseText(v.trim()).toLowerCase() : undefined))
+  .transform(sanitizedText('rpos'))
+  .transform((v) => v?.toLowerCase())
   .refine(
     (v) => {
       if (v === undefined) return true;
@@ -150,32 +144,22 @@ export const AdvancedSearchInputSchema = z
   .object({
     on: onyomiSchema,
     kun: hiraganaOrRomajiSchema,
-    kem: z
-      .string()
-      .optional()
-      .transform((v) => v?.trim()),
+    kem: z.string().optional().transform(sanitizedText('kem')),
     ks: z.number().int().min(1).max(30).optional(),
     kanji: z
       .string()
       .length(1)
       .optional()
-      .transform((v) => (v ? normalizeJapaneseText(v.trim()) : undefined))
+      .transform(sanitizedText('kanji'))
       .refine(
         (v) => {
           if (v === undefined) return true;
           return isKanjiCharacter(v);
         },
-        {
-          message:
-            'Invalid kanji character. Must be a CJK ideograph (e.g., 親, 見, 日). ' +
-            'Hiragana, katakana, romaji, and other characters are not accepted.',
-        }
+        { message: KANJI_CHARACTER_MESSAGE }
       ),
     rjn: hiraganaOrRomajiSchema,
-    rem: z
-      .string()
-      .optional()
-      .transform((v) => v?.trim()),
+    rem: z.string().optional().transform(sanitizedText('rem')),
     rs: z.number().int().min(1).max(17).optional(),
     rpos: radicalPositionSchema,
     grade: z.number().int().min(1).max(6).optional(),

@@ -3,8 +3,7 @@
  */
 
 import { z } from 'zod';
-import { normalizeJapaneseText, validateNoControlChars } from '../utils/unicode.js';
-import { issueOnThrow } from './utils.js';
+import { issueOnThrow, sanitizeText } from './utils.js';
 
 /**
  * Zod shape for basic kanji search (for MCP SDK registration).
@@ -39,9 +38,7 @@ export const BasicSearchInputSchema = z.object({
     .trim()
     .min(1, 'Search query cannot be empty')
     .max(100, 'Search query must be 100 characters or less')
-    .transform((v, ctx) =>
-      issueOnThrow(ctx, () => validateNoControlChars(normalizeJapaneseText(v), 'query'))
-    ),
+    .transform((v, ctx) => issueOnThrow(ctx, () => sanitizeText(v, 'query'))),
 });
 
 /**

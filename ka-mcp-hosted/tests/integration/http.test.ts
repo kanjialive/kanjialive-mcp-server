@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll, beforeEach, vi } from 'vitest';
-import type { RequestInfo } from '../../src/api/types.js';
+import { requestInfo, mockSearchResult, mockSearchResultRow } from '../helpers.js';
 
 const searchKanji = vi.fn();
 const getKanjiDetail = vi.fn();
@@ -11,16 +11,8 @@ vi.mock('../../src/api/client.js', () => ({
   getApiHeaders: () => ({ 'X-RapidAPI-Key': 'test-key' }),
 }));
 
-process.env.RAPIDAPI_KEY = 'test-key';
-
 const { app, sessions, sessionLastAccess, closeAllSessions, sessionCleanupInterval, reapStaleSessions, SESSION_TIMEOUT_MS, isValidSessionId, VERSION } =
   await import('../../src/app.js');
-
-const requestInfo: RequestInfo = {
-  endpoint: 'search/water',
-  params: {},
-  timestamp: '2026-08-16T18:07:07.373Z',
-};
 
 const PROTOCOL_VERSION = '2024-11-05';
 
@@ -38,25 +30,46 @@ const INITIALIZE_BODY = {
 const MCP_ACCEPT = 'application/json, text/event-stream';
 
 /**
- * POST a JSON-RPC body to /mcp.
+ * Drive /mcp through the real router.
  *
  * The Host header is required: the SDK transport rebuilds a WHATWG Request from
  * the Node-style request the app hands it, and needs Host to form an absolute
  * URL. Real HTTP/1.1 clients always send one; a synthetic Request does not.
+ * Every verb goes through here so none of them can quietly omit it.
  */
-async function post(body: unknown, headers: Record<string, string> = {}): Promise<Response> {
+async function mcp(
+  method: string,
+  { headers = {}, body }: { headers?: Record<string, string>; body?: unknown } = {}
+): Promise<Response> {
   return app.fetch(
     new Request('http://localhost/mcp', {
-      method: 'POST',
+      method,
       headers: {
         Host: 'localhost',
         'Content-Type': 'application/json',
         Accept: MCP_ACCEPT,
         ...headers,
       },
-      body: typeof body === 'string' ? body : JSON.stringify(body),
+      ...(body === undefined
+        ? {}
+        : { body: typeof body === 'string' ? body : JSON.stringify(body) }),
     })
   );
+}
+
+/** POST a JSON-RPC body to /mcp. */
+async function post(body: unknown, headers: Record<string, string> = {}): Promise<Response> {
+  return mcp('POST', { headers, body });
+}
+
+/** GET /mcp, optionally as a given session. */
+async function get(sessionId?: string): Promise<Response> {
+  return mcp('GET', { headers: sessionId ? { 'mcp-session-id': sessionId } : {} });
+}
+
+/** DELETE /mcp, optionally as a given session. */
+async function del(sessionId?: string): Promise<Response> {
+  return mcp('DELETE', { headers: sessionId ? { 'mcp-session-id': sessionId } : {} });
 }
 
 /** Read a response body as JSON. Response.json() is typed `unknown` here. */
@@ -303,7 +316,7 @@ describe('MCP protocol over HTTP', () => {
 
   it('calls a tool end to end and returns formatted markdown', async () => {
     searchKanji.mockResolvedValue([
-      [{ kanji: { character: '水', stroke: 4 }, radical: { character: '⽔', stroke: 4, order: 109 } }],
+      [mockSearchResult],
       requestInfo,
     ]);
 
@@ -322,7 +335,7 @@ describe('MCP protocol over HTTP', () => {
     };
 
     expect(rpc.result.content[0].text).toContain('# Kanji Search Results');
-    expect(rpc.result.content[0].text).toContain('| 水 | 4 | ⽔ | 4 | 109 |');
+    expect(rpc.result.content[0].text).toContain(mockSearchResultRow);
     expect(searchKanji).toHaveBeenCalledWith('search/water');
   });
 
@@ -373,12 +386,7 @@ describe('DELETE /mcp', () => {
     const sessionId = await initSession();
     expect(sessions.has(sessionId)).toBe(true);
 
-    const res = await app.fetch(
-      new Request('http://localhost/mcp', {
-        method: 'DELETE',
-        headers: { 'mcp-session-id': sessionId },
-      })
-    );
+    const res = await del(sessionId);
 
     expect(res.status).toBe(200);
     expect(await json(res)).toEqual({ success: true });
@@ -387,29 +395,19 @@ describe('DELETE /mcp', () => {
   });
 
   it('rejects a malformed session id', async () => {
-    const res = await app.fetch(
-      new Request('http://localhost/mcp', {
-        method: 'DELETE',
-        headers: { 'mcp-session-id': 'garbage' },
-      })
-    );
+    const res = await del('garbage');
     expect(res.status).toBe(400);
     expect((await json(res)).error.code).toBe(-32600);
   });
 
   it('rejects a missing session id', async () => {
-    const res = await app.fetch(new Request('http://localhost/mcp', { method: 'DELETE' }));
+    const res = await del();
     expect(res.status).toBe(400);
     expect((await json(res)).error.code).toBe(-32600);
   });
 
   it('rejects an unknown session id', async () => {
-    const res = await app.fetch(
-      new Request('http://localhost/mcp', {
-        method: 'DELETE',
-        headers: { 'mcp-session-id': VALID_UUID },
-      })
-    );
+    const res = await del(VALID_UUID);
     expect(res.status).toBe(400);
     expect((await json(res)).error.code).toBe(-32000);
   });
@@ -417,13 +415,11 @@ describe('DELETE /mcp', () => {
 
 describe('GET /mcp', () => {
   it('requires a valid, known session', async () => {
-    const missing = await app.fetch(new Request('http://localhost/mcp'));
+    const missing = await get();
     expect(missing.status).toBe(400);
     expect((await json(missing)).error.code).toBe(-32600);
 
-    const unknown = await app.fetch(
-      new Request('http://localhost/mcp', { headers: { 'mcp-session-id': VALID_UUID } })
-    );
+    const unknown = await get(VALID_UUID);
     expect(unknown.status).toBe(400);
     expect((await json(unknown)).error.code).toBe(-32000);
   });
@@ -505,9 +501,9 @@ describe('body limit', () => {
   });
 
   it('rejects a declared payload over 1 MB with 413 before reading it', async () => {
-    const res = await post(OVERSIZED, {
-      'content-length': String(new TextEncoder().encode(OVERSIZED).length),
-    });
+    // ASCII-only payload, so character count is byte count — no need to
+    // allocate a second megabyte just to measure the first.
+    const res = await post(OVERSIZED, { 'content-length': String(OVERSIZED.length) });
 
     expect(res.status).toBe(413);
     const body = await json(res);

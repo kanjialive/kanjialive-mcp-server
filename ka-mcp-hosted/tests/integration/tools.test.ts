@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { AxiosError, AxiosHeaders } from 'axios';
-import type { RequestInfo } from '../../src/api/types.js';
+import { httpError, requestInfo, mockSearchResult, mockSearchResultRow } from '../helpers.js';
 
 const searchKanji = vi.fn();
 const getKanjiDetail = vi.fn();
@@ -14,27 +13,9 @@ const { executeBasicSearch } = await import('../../src/mcp/tools/basicSearch.js'
 const { executeAdvancedSearch } = await import('../../src/mcp/tools/advancedSearch.js');
 const { executeKanjiDetails } = await import('../../src/mcp/tools/kanjiDetails.js');
 
-const requestInfo: RequestInfo = {
-  endpoint: 'search/water',
-  params: {},
-  timestamp: '2026-08-16T18:07:07.373Z',
-};
-
 /** Extract the single text block from a tool result. */
 function textOf(result: { content: Array<{ text: string }> }): string {
   return result.content[0].text;
-}
-
-function httpError(status: number): AxiosError {
-  const error = new AxiosError('Request failed');
-  error.response = {
-    status,
-    statusText: '',
-    data: {},
-    headers: new AxiosHeaders(),
-    config: { headers: new AxiosHeaders() },
-  } as AxiosError['response'];
-  return error;
 }
 
 beforeEach(() => {
@@ -45,7 +26,7 @@ beforeEach(() => {
 describe('executeBasicSearch', () => {
   it('formats results as a markdown table', async () => {
     searchKanji.mockResolvedValue([
-      [{ kanji: { character: '水', stroke: 4 }, radical: { character: '⽔', stroke: 4, order: 109 } }],
+      [mockSearchResult],
       requestInfo,
     ]);
 
@@ -53,7 +34,7 @@ describe('executeBasicSearch', () => {
 
     expect(result.isError).toBeUndefined();
     expect(textOf(result)).toContain('# Kanji Search Results');
-    expect(textOf(result)).toContain('| 水 | 4 | ⽔ | 4 | 109 |');
+    expect(textOf(result)).toContain(mockSearchResultRow);
     expect(textOf(result)).toContain('query=water');
   });
 

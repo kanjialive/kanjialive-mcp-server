@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import {
   readRadicalsResource,
   radicalsResourceDefinition,
@@ -26,10 +26,13 @@ interface RadicalsPayload {
   statistics?: unknown;
 }
 
-async function loadPayload(): Promise<RadicalsPayload> {
+// Parsed once: the payload is ~150 KB and every assertion below is read-only.
+let payload: RadicalsPayload;
+
+beforeAll(async () => {
   const result = await readRadicalsResource();
-  return JSON.parse(result.contents[0].text) as RadicalsPayload;
-}
+  payload = JSON.parse(result.contents[0].text) as RadicalsPayload;
+});
 
 describe('radicals resource definition', () => {
   it('exposes a stable URI and JSON mime type', () => {
@@ -51,22 +54,19 @@ describe('readRadicalsResource', () => {
     expect(() => JSON.parse(result.contents[0].text)).not.toThrow();
   });
 
-  it('ships all 321 entries, and the count matches the declared total', async () => {
-    const payload = await loadPayload();
+  it('ships all 321 entries, and the count matches the declared total', () => {
     expect(payload.total_entries).toBe(321);
     expect(payload.radicals).toHaveLength(321);
   });
 
-  it('contains the 214 Kangxi radicals plus 107 variants', async () => {
-    const payload = await loadPayload();
+  it('contains the 214 Kangxi radicals plus 107 variants', () => {
     const kangxi = payload.radicals.filter((r) => r.origin === 'kangxi');
     const variants = payload.radicals.filter((r) => r.origin === 'variant');
     expect(kangxi).toHaveLength(214);
     expect(variants).toHaveLength(107);
   });
 
-  it('gives every entry the fields the reference is meant to provide', async () => {
-    const payload = await loadPayload();
+  it('gives every entry the fields the reference is meant to provide', () => {
     for (const radical of payload.radicals) {
       expect(typeof radical.character).toBe('string');
       expect(radical.character.length).toBeGreaterThan(0);
@@ -77,8 +77,7 @@ describe('readRadicalsResource', () => {
     }
   });
 
-  it('gives every private-use-area entry a font-independent fallback', async () => {
-    const payload = await loadPayload();
+  it('gives every private-use-area entry a font-independent fallback', () => {
     const pua = payload.radicals.filter((r) => r.pua_encoded);
     expect(pua).toHaveLength(60);
     for (const radical of pua) {
@@ -87,9 +86,8 @@ describe('readRadicalsResource', () => {
     }
   });
 
-  it('points every PUA variant at the standard radical it stands in for', async () => {
+  it('points every PUA variant at the standard radical it stands in for', () => {
     // Kangxi-origin PUA entries have no parent; only variants do.
-    const payload = await loadPayload();
     const puaVariants = payload.radicals.filter((r) => r.pua_encoded && r.origin === 'variant');
     expect(puaVariants.length).toBeGreaterThan(0);
     for (const radical of puaVariants) {
@@ -97,8 +95,7 @@ describe('readRadicalsResource', () => {
     }
   });
 
-  it('numbers the Kangxi radicals 1..214 without gaps', async () => {
-    const payload = await loadPayload();
+  it('numbers the Kangxi radicals 1..214 without gaps', () => {
     const orders = payload.radicals
       .filter((r) => r.origin === 'kangxi')
       .map((r) => r.sort_order)

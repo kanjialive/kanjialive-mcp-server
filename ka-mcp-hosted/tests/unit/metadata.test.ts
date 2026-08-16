@@ -3,7 +3,8 @@ import {
   extractFieldsFromResults,
   createSearchMetadata,
 } from '../../src/formatters/metadata.js';
-import type { SearchResponse, RequestInfo } from '../../src/api/types.js';
+import type { SearchResponse } from '../../src/api/types.js';
+import { requestInfo } from '../helpers.js';
 
 describe('extractFieldsFromResults', () => {
   it('returns an empty list for no results', () => {
@@ -39,12 +40,6 @@ describe('extractFieldsFromResults', () => {
 });
 
 describe('createSearchMetadata', () => {
-  const requestInfo: RequestInfo = {
-    endpoint: 'search/water',
-    params: {},
-    timestamp: '2026-08-16T18:07:07.373Z',
-  };
-
   it('reports the returned count, fields, timestamp and query parameters', () => {
     const results = [
       { kanji: { character: '水' }, radical: {} },

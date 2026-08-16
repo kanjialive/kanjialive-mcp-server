@@ -4,7 +4,7 @@
 npm test              # run once
 npm run test:watch    # watch mode
 npm run test:coverage # run with coverage + thresholds
-npm run typecheck     # src (build config) and tests (tsconfig.test.json)
+npm run typecheck     # src and tests (tsconfig.test.json covers both)
 ```
 
 ## Layout
@@ -21,9 +21,11 @@ npm run typecheck     # src (build config) and tests (tsconfig.test.json)
 | `unit/apiClient.test.ts` | Headers, response-shape validation (axios mocked) |
 | `unit/radicals.test.ts` | The 321-entry resource and its missing-file path |
 | `unit/logger.test.ts` | API log helpers |
-| `unit/nodeShims.test.ts` | The Node `req`/`res` shims the SDK transport needs |
+| `unit/nodeShims.test.ts` | `src/http/nodeShims.ts`, the Node `req`/`res` adapters |
 | `integration/tools.test.ts` | The three tools end to end, upstream mocked |
 | `integration/http.test.ts` | Routes, sessions, CORS, body limit, real MCP protocol |
+| `helpers.ts` | Shared factories and fixtures (`httpError`, `requestInfo`, …) |
+| `setup.ts` | Silences the logger and sets a dummy `RAPIDAPI_KEY` |
 
 ## How the HTTP tests work
 
@@ -41,7 +43,8 @@ mocked, so no test touches the network or needs a RapidAPI key.
 Two things to know when adding HTTP tests:
 
 - **Send a `Host` header.** The SDK transport rebuilds a WHATWG `Request` and
-  needs `Host` for an absolute URL. The `post()` helper does this already.
+  needs `Host` for an absolute URL. Go through `post()`, `get()` or `del()`,
+  which all route through one builder that sets it.
 - **Responses may be SSE.** Use the `parseRpc()` helper, which handles both a
   bare JSON body and an `event:`/`data:` frame.
 

@@ -1,24 +1,24 @@
 /**
  * Kanji Alive MCP Server - HTTP application.
  *
- * Builds the Hono app, session store, and the Node req/res shims the MCP SDK
- * transport expects. Kept separate from `index.ts` so the app can be exercised
- * via `app.fetch()` without binding a port or starting the process.
+ * Builds the Hono app and the session store. Kept separate from `index.ts` so
+ * the app can be exercised via `app.fetch()` without binding a port or starting
+ * the process; the Node req/res shims the MCP SDK transport expects live in
+ * `http/nodeShims.ts`.
  */
 
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
-import { Readable } from 'node:stream';
-import { EventEmitter } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createMCPServer } from './mcp/server.js';
+import { createMockRequest, createMockResponse } from './http/nodeShims.js';
 import { logger } from './utils/logger.js';
 
 // Load version from package.json to avoid duplication
@@ -50,7 +50,7 @@ export function jsonRpcError(code: number, message: string, id: unknown = null):
  */
 function getSessionTransport(
   sessionId: string | undefined,
-  c: { json: (data: object, status: number) => Response }
+  c: Context
 ): StreamableHTTPServerTransport | Response {
   if (!isValidSessionId(sessionId)) {
     return c.json(jsonRpcError(-32600, 'Invalid or missing session ID'), 400);
@@ -61,204 +61,13 @@ function getSessionTransport(
   return sessions.get(sessionId)!;
 }
 
-/**
- * Minimal interface for MCP SDK's handleRequest method.
- * This is a subset of IncomingMessage that the SDK actually uses.
- */
-type MockIncomingMessage = Readable & {
-  method: string;
-  url: string;
-  headers: Record<string, string>;
-  rawHeaders: string[];
-  httpVersion: string;
-  httpVersionMajor: number;
-  httpVersionMinor: number;
-  complete: boolean;
-  socket: { remoteAddress: string; remotePort: number };
-  connection: null;
-};
-
-/**
- * Create a mock Node.js IncomingMessage from Hono request context.
- */
-export function createMockRequest(
-  method: string,
-  path: string,
-  headers: Record<string, string>,
-  _body?: unknown
-): MockIncomingMessage {
-  const rawHeaders: string[] = [];
-  for (const [key, value] of Object.entries(headers)) {
-    rawHeaders.push(key, value);
-  }
-
-  // Create a readable stream (body is passed separately to handleRequest)
-  const stream = new Readable({
-    read() {
-      this.push(null);
-    },
-  });
-
-  // Extend stream with IncomingMessage properties
-  const mockReq: MockIncomingMessage = Object.assign(stream, {
-    method,
-    url: path,
-    headers,
-    rawHeaders,
-    httpVersion: '1.1',
-    httpVersionMajor: 1,
-    httpVersionMinor: 1,
-    complete: true,
-    socket: {
-      remoteAddress: headers['x-forwarded-for'] || 'unknown',
-      remotePort: 0,
-    },
-    connection: null,
-  });
-
-  return mockReq;
-}
-
-/**
- * Minimal interface for MCP SDK's handleRequest method.
- * This is a subset of ServerResponse that the SDK actually uses.
- */
-type MockServerResponse = EventEmitter & {
-  statusCode: number;
-  statusMessage: string;
-  headersSent: boolean;
-  finished: boolean;
-  writable: boolean;
-  writeHead: (status: number, statusMessage?: string | Record<string, string>, headers?: Record<string, string>) => MockServerResponse;
-  write: (chunk: string | Buffer | Uint8Array) => boolean;
-  end: (data?: string | Buffer | Uint8Array | (() => void), encoding?: BufferEncoding | (() => void), callback?: () => void) => MockServerResponse;
-  setHeader: (name: string, value: string | string[]) => void;
-  getHeader: (name: string) => string | string[] | undefined;
-  getHeaders: () => Record<string, string | string[]>;
-  hasHeader: (name: string) => boolean;
-  removeHeader: (name: string) => void;
-  writeContinue: () => void;
-  setTimeout: () => MockServerResponse;
-  flushHeaders: () => void;
-  cork: () => void;
-  uncork: () => void;
-  addTrailers: () => void;
-};
-
-/**
- * Create a mock Node.js ServerResponse for capturing response data.
- */
-export function createMockResponse(): {
-  mock: MockServerResponse;
-  getResponse: () => { status: number; headers: Record<string, string>; body: string };
-} {
-  const responseHeaders: Record<string, string | string[]> = {};
-  const responseChunks: string[] = [];
-  let responseStatus = 200;
-
-  const mock = new EventEmitter() as MockServerResponse;
-
-  mock.statusCode = 200;
-  mock.statusMessage = 'OK';
-  mock.headersSent = false;
-  mock.finished = false;
-  mock.writable = true;
-
-  mock.writeHead = (
-    status: number,
-    statusMessage?: string | Record<string, string>,
-    headers?: Record<string, string>
-  ) => {
-    responseStatus = status;
-    mock.statusCode = status;
-
-    let actualHeaders: Record<string, string> | undefined;
-    if (typeof statusMessage === 'object') {
-      actualHeaders = statusMessage;
-    } else {
-      if (statusMessage) mock.statusMessage = statusMessage;
-      actualHeaders = headers;
-    }
-
-    if (actualHeaders) {
-      Object.assign(responseHeaders, actualHeaders);
-    }
-    mock.headersSent = true;
-    return mock;
-  };
-
-  mock.write = (chunk: string | Buffer | Uint8Array) => {
-    if (chunk instanceof Uint8Array) {
-      responseChunks.push(new TextDecoder().decode(chunk));
-    } else {
-      responseChunks.push(chunk.toString());
-    }
-    return true;
-  };
-
-  mock.end = (
-    data?: string | Buffer | Uint8Array | (() => void),
-    encoding?: BufferEncoding | (() => void),
-    callback?: () => void
-  ) => {
-    if (typeof data === 'function') {
-      data();
-    } else if (data instanceof Uint8Array) {
-      responseChunks.push(new TextDecoder().decode(data));
-    } else if (data) {
-      responseChunks.push(data.toString());
-    }
-    if (typeof encoding === 'function') {
-      encoding();
-    } else if (typeof callback === 'function') {
-      callback();
-    }
-    mock.finished = true;
-    mock.emit('finish');
-    return mock;
-  };
-
-  mock.setHeader = (name: string, value: string | string[]) => {
-    responseHeaders[name] = value;
-  };
-
-  mock.getHeader = (name: string) => responseHeaders[name];
-  mock.getHeaders = () => ({ ...responseHeaders });
-  mock.hasHeader = (name: string) => name in responseHeaders;
-  mock.removeHeader = (name: string) => {
-    delete responseHeaders[name];
-  };
-
-  // Additional methods that might be called
-  mock.writeContinue = () => {};
-  mock.setTimeout = () => mock;
-  mock.flushHeaders = () => {};
-  mock.cork = () => {};
-  mock.uncork = () => {};
-  mock.addTrailers = () => {};
-
-  const getResponse = () => ({
-    status: responseStatus,
-    headers: Object.entries(responseHeaders).reduce(
-      (acc, [key, value]) => {
-        acc[key] = Array.isArray(value) ? value.join(', ') : value;
-        return acc;
-      },
-      {} as Record<string, string>
-    ),
-    body: responseChunks.join(''),
-  });
-
-  return { mock, getResponse };
-}
-
 export const app = new Hono();
 
 // Session storage for stateful connections
 export const sessions: Map<string, StreamableHTTPServerTransport> = new Map();
 export const sessionLastAccess: Map<string, number> = new Map();
 export const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
-export const SESSION_CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
+const SESSION_CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
 
 /**
  * Remove sessions that haven't been accessed within SESSION_TIMEOUT_MS.
@@ -308,7 +117,7 @@ app.use(
 export const MAX_BODY_BYTES = 1024 * 1024; // 1 MB
 
 /** The 413 returned for an oversized request body. */
-function bodyTooLarge(c: { json: (data: object, status: 413) => Response }): Response {
+function bodyTooLarge(c: Context): Response {
   return c.json(jsonRpcError(-32600, 'Request body too large'), 413);
 }
 
@@ -518,5 +327,3 @@ export async function closeAllSessions(): Promise<void> {
   sessions.clear();
   sessionLastAccess.clear();
 }
-
-export default app;

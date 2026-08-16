@@ -5,6 +5,7 @@
  */
 
 import { z } from 'zod';
+import { normalizeJapaneseText, validateNoControlChars } from '../utils/unicode.js';
 
 /**
  * Run a validator that reports failure by throwing, recording the thrown
@@ -30,6 +31,52 @@ export function issueOnThrow<T>(ctx: z.RefinementCtx, run: () => T): T {
     return z.NEVER;
   }
 }
+
+/**
+ * Trim, NFKC-normalize, and reject control characters in caller-supplied text.
+ *
+ * @param value - Raw text from the caller
+ * @param fieldName - Field name used in the rejection message
+ * @returns The trimmed, normalized text
+ * @throws Error if the normalized text contains control characters
+ */
+export function sanitizeText(value: string, fieldName: string): string {
+  return validateNoControlChars(normalizeJapaneseText(value.trim()), fieldName);
+}
+
+/**
+ * Build the `.transform()` every optional string field uses to sanitize input.
+ *
+ * Routing all of them through one factory makes skipping sanitization a
+ * deliberate act rather than an omission — `kem` and `rem` previously opted out
+ * by simply not spelling the chain out, and passed control characters straight
+ * into the API query string.
+ *
+ * Text that is empty once trimmed collapses to `undefined` so a blank value is
+ * dropped rather than sent as `?field=`, and so it does not satisfy the
+ * "at least one parameter" check on advanced search.
+ *
+ * @param fieldName - Field name used in the rejection message
+ * @returns A Zod transform for an optional string field
+ */
+export function sanitizedText(
+  fieldName: string
+): (value: string | undefined, ctx: z.RefinementCtx) => string | undefined {
+  return (value, ctx) => {
+    if (value === undefined) return undefined;
+    const normalized = issueOnThrow(ctx, () => sanitizeText(value, fieldName));
+    return normalized === '' ? undefined : normalized;
+  };
+}
+
+/**
+ * Rejection message shared by every field that must hold a single kanji.
+ *
+ * Kept in one place because `kanjiDetail` and `advancedSearch` both assert it.
+ */
+export const KANJI_CHARACTER_MESSAGE =
+  'Invalid kanji character. Must be a CJK ideograph (e.g., 親, 見, 日). ' +
+  'Hiragana, katakana, romaji, and other characters are not accepted.';
 
 /**
  * Valid radical positions in romaji (lowercase).

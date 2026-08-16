@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { AxiosError, AxiosHeaders } from 'axios';
 import {
   ToolError,
   ValidationError,
@@ -8,26 +7,7 @@ import {
   toErrorResult,
 } from '../../src/utils/errors.js';
 import { formatZodError } from '../../src/utils/validation.js';
-
-/** Build an AxiosError carrying a given HTTP status. */
-function httpError(status: number, statusText = ''): AxiosError {
-  const error = new AxiosError('Request failed');
-  error.response = {
-    status,
-    statusText,
-    data: {},
-    headers: new AxiosHeaders(),
-    config: { headers: new AxiosHeaders() },
-  } as AxiosError['response'];
-  return error;
-}
-
-/** Build an AxiosError carrying a transport-level error code. */
-function codeError(code: string): AxiosError {
-  const error = new AxiosError('Transport failure');
-  error.code = code;
-  return error;
-}
+import { httpError, codeError } from '../helpers.js';
 
 describe('custom error classes', () => {
   it('keeps instanceof working across the prototype chain', () => {
@@ -82,7 +62,7 @@ describe('handleApiError', () => {
   });
 
   it('falls back to status and statusText for other HTTP errors', () => {
-    expect(() => handleApiError(httpError(418, "I'm a teapot"))).toThrow(
+    expect(() => handleApiError(httpError(418, { statusText: "I'm a teapot" }))).toThrow(
       /status 418: I'm a teapot/
     );
   });

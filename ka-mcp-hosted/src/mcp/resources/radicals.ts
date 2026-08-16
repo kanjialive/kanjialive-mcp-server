@@ -14,21 +14,25 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
- * Cached radicals data (loaded once on first access).
+ * Cached resource text (built once on first access).
+ *
+ * The serialized form is cached rather than the parsed object: the payload is
+ * ~150 KB and never mutated, so re-running JSON.stringify per read would
+ * allocate that much garbage on every resources/read for no benefit.
  */
-let radicalsCache: Record<string, unknown> | null = null;
+let radicalsText: string | null = null;
 
 /**
  * Load the Japanese radicals reference data from bundled JSON.
  *
- * The data is cached after first load to avoid repeated file I/O.
+ * The result is cached after first load to avoid repeated file I/O.
  *
- * @returns Radicals data with metadata and radical entries
+ * @returns Radicals data serialized for the resource response
  * @throws Error if the radicals JSON file is missing
  */
-async function loadRadicalsData(): Promise<Record<string, unknown>> {
-  if (radicalsCache !== null) {
-    return radicalsCache;
+async function loadRadicalsText(): Promise<string> {
+  if (radicalsText !== null) {
+    return radicalsText;
   }
 
   const radicalsFile = path.join(__dirname, '../../data/japanese-radicals.json');
@@ -36,12 +40,12 @@ async function loadRadicalsData(): Promise<Record<string, unknown>> {
   try {
     const data = await fs.readFile(radicalsFile, 'utf-8');
     const parsed = JSON.parse(data) as Record<string, unknown>;
-    radicalsCache = parsed;
+    radicalsText = JSON.stringify(parsed, null, 2);
     logger.debug('Loaded radicals data', {
       totalEntries: parsed.total_entries ?? 0,
       filePath: radicalsFile,
     });
-    return parsed;
+    return radicalsText;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new Error(
@@ -83,13 +87,12 @@ export async function readRadicalsResource(): Promise<{
   }>;
 }> {
   try {
-    const data = await loadRadicalsData();
     return {
       contents: [
         {
           uri: RADICALS_RESOURCE_URI,
           mimeType: 'application/json',
-          text: JSON.stringify(data, null, 2),
+          text: await loadRadicalsText(),
         },
       ],
     };

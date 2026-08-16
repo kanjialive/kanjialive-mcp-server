@@ -1,24 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { AxiosError, AxiosHeaders } from 'axios';
+import { AxiosError } from 'axios';
 import {
   shouldRetry,
   getRetryDelay,
   calculateBackoffDelay,
 } from '../../src/api/client.js';
 import { MAX_BACKOFF, INITIAL_BACKOFF, MAX_RETRIES } from '../../src/api/constants.js';
-
-/** Build an AxiosError with a status and optional response headers. */
-function httpError(status: number, headers: Record<string, string> = {}): AxiosError {
-  const error = new AxiosError('Request failed');
-  error.response = {
-    status,
-    statusText: '',
-    data: {},
-    headers,
-    config: { headers: new AxiosHeaders() },
-  } as unknown as AxiosError['response'];
-  return error;
-}
+import { httpError } from '../helpers.js';
 
 describe('shouldRetry', () => {
   it('retries on rate limiting', () => {
@@ -77,31 +65,31 @@ describe('calculateBackoffDelay', () => {
 
 describe('getRetryDelay', () => {
   it('honours a numeric Retry-After header', () => {
-    expect(getRetryDelay(httpError(429, { 'retry-after': '5' }), 1)).toBe(5000);
-    expect(getRetryDelay(httpError(429, { 'retry-after': '1' }), 1)).toBe(1000);
+    expect(getRetryDelay(httpError(429, { headers: { 'retry-after': '5' } }), 1)).toBe(5000);
+    expect(getRetryDelay(httpError(429, { headers: { 'retry-after': '1' } }), 1)).toBe(1000);
   });
 
   it('caps an excessive Retry-After at MAX_BACKOFF', () => {
     // An unbounded Retry-After would let the upstream pin a worker for hours.
-    expect(getRetryDelay(httpError(429, { 'retry-after': '3600' }), 1)).toBe(MAX_BACKOFF * 1000);
-    expect(getRetryDelay(httpError(429, { 'retry-after': '86400' }), 1)).toBe(MAX_BACKOFF * 1000);
+    expect(getRetryDelay(httpError(429, { headers: { 'retry-after': '3600' } }), 1)).toBe(MAX_BACKOFF * 1000);
+    expect(getRetryDelay(httpError(429, { headers: { 'retry-after': '86400' } }), 1)).toBe(MAX_BACKOFF * 1000);
   });
 
   it('accepts a Retry-After exactly at the cap', () => {
-    expect(getRetryDelay(httpError(429, { 'retry-after': String(MAX_BACKOFF) }), 1)).toBe(
+    expect(getRetryDelay(httpError(429, { headers: { 'retry-after': String(MAX_BACKOFF) } }), 1)).toBe(
       MAX_BACKOFF * 1000
     );
   });
 
   it('honours Retry-After: 0 as an immediate retry', () => {
     // The header is parsed as delay-seconds, so 0 means retry now.
-    expect(getRetryDelay(httpError(429, { 'retry-after': '0' }), 1)).toBe(0);
+    expect(getRetryDelay(httpError(429, { headers: { 'retry-after': '0' } }), 1)).toBe(0);
   });
 
   it('falls back to exponential backoff for an HTTP-date Retry-After', () => {
     // The header may be a date; only the delay-seconds form is parsed.
     const delay = getRetryDelay(
-      httpError(429, { 'retry-after': 'Wed, 21 Oct 2026 07:28:00 GMT' }),
+      httpError(429, { headers: { 'retry-after': 'Wed, 21 Oct 2026 07:28:00 GMT' } }),
       2
     );
     expect(delay).toBeGreaterThanOrEqual(INITIAL_BACKOFF * 2 * 1000);
@@ -110,7 +98,7 @@ describe('getRetryDelay', () => {
 
   it('falls back to backoff for a malformed or negative Retry-After', () => {
     for (const value of ['abc', '-5', '1.5', '']) {
-      const delay = getRetryDelay(httpError(429, { 'retry-after': value }), 1);
+      const delay = getRetryDelay(httpError(429, { headers: { 'retry-after': value } }), 1);
       expect(delay).toBeGreaterThanOrEqual(INITIAL_BACKOFF * 1000);
       expect(delay).toBeLessThanOrEqual(INITIAL_BACKOFF * 1000 * 1.1);
     }

@@ -1,5 +1,14 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { logger, logApiRequest, logApiResponse, logApiError } from '../../src/utils/logger.js';
+
+// Winston's level methods are chainable, so the spies must return the logger.
+let debug: MockInstance;
+let error: MockInstance;
+
+beforeEach(() => {
+  debug = vi.spyOn(logger, 'debug').mockReturnValue(logger);
+  error = vi.spyOn(logger, 'error').mockReturnValue(logger);
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -13,8 +22,6 @@ describe('logger', () => {
 
 describe('logApiRequest', () => {
   it('logs method, path and params at debug level', () => {
-    const debug = vi.spyOn(logger, 'debug').mockReturnValue(logger);
-
     logApiRequest('GET', 'search/water', { grade: 2 });
 
     expect(debug).toHaveBeenCalledWith('API request', {
@@ -25,7 +32,6 @@ describe('logApiRequest', () => {
   });
 
   it('defaults params to an empty object', () => {
-    const debug = vi.spyOn(logger, 'debug').mockReturnValue(logger);
     logApiRequest('GET', 'search/water');
     expect(debug).toHaveBeenCalledWith('API request', {
       method: 'GET',
@@ -37,8 +43,6 @@ describe('logApiRequest', () => {
 
 describe('logApiResponse', () => {
   it('logs path, status and duration at debug level', () => {
-    const debug = vi.spyOn(logger, 'debug').mockReturnValue(logger);
-
     logApiResponse('search/water', 200, 42);
 
     expect(debug).toHaveBeenCalledWith('API response', {
@@ -51,8 +55,6 @@ describe('logApiResponse', () => {
 
 describe('logApiError', () => {
   it('logs the error type and message at error level', () => {
-    const error = vi.spyOn(logger, 'error').mockReturnValue(logger);
-
     logApiError('search/water', new TypeError('boom'));
 
     expect(error).toHaveBeenCalledWith('API error', {
@@ -63,8 +65,6 @@ describe('logApiError', () => {
   });
 
   it('merges extra context into the log entry', () => {
-    const error = vi.spyOn(logger, 'error').mockReturnValue(logger);
-
     logApiError('search/water', new Error('boom'), { status: 500, attempt: 2 });
 
     expect(error).toHaveBeenCalledWith('API error', {
