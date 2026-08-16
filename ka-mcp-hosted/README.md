@@ -15,6 +15,8 @@ TypeScript-based MCP server for cloud hosting with Streamable HTTP transport. De
 
 ## Installation
 
+Requires Node.js 24.x (`.nvmrc` pins 24.19.0 for `nvm`/`fnm` users).
+
 ```bash
 cd ka-mcp-hosted
 npm install

@@ -100,9 +100,6 @@ export const sessionCleanupInterval = setInterval(
 // Prevent cleanup interval from keeping the process alive
 sessionCleanupInterval.unref();
 
-// Create the MCP server once at startup
-const mcpServer = createMCPServer(VERSION);
-
 // CORS: allow browser-based MCP clients to connect
 app.use(
   '/mcp',
@@ -208,7 +205,9 @@ app.post('/mcp', async (c) => {
         }
       };
 
-      await mcpServer.connect(transport);
+      // One McpServer per transport: the SDK's Protocol owns a single transport,
+      // so a shared instance rejects the second concurrent session.
+      await createMCPServer(VERSION).connect(transport);
     } else {
       return c.json(
         jsonRpcError(-32000, 'Invalid session. Send an initialize request without mcp-session-id to start.'),

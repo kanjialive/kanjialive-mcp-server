@@ -45,7 +45,8 @@ export function createMCPServer(version: string): McpServer {
   registerTools(server);
   registerResources(server);
 
-  logger.info('MCP server configured', {
+  // Debug, not info: one server is built per session, so this fires per connection.
+  logger.debug('MCP server configured', {
     tools: [BASIC_SEARCH_TOOL_NAME, ADVANCED_SEARCH_TOOL_NAME, KANJI_DETAIL_TOOL_NAME],
     resources: [RADICALS_RESOURCE_URI],
   });
@@ -69,27 +70,33 @@ const TOOL_ANNOTATIONS = {
  * @param server - MCP server instance
  */
 function registerTools(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     BASIC_SEARCH_TOOL_NAME,
-    BASIC_SEARCH_TOOL_DESCRIPTION,
-    basicSearchParamsShape,
-    TOOL_ANNOTATIONS,
+    {
+      description: BASIC_SEARCH_TOOL_DESCRIPTION,
+      inputSchema: basicSearchParamsShape,
+      annotations: TOOL_ANNOTATIONS,
+    },
     (args) => executeBasicSearch(args)
   );
 
-  server.tool(
+  server.registerTool(
     ADVANCED_SEARCH_TOOL_NAME,
-    ADVANCED_SEARCH_TOOL_DESCRIPTION,
-    advancedSearchParamsShape,
-    TOOL_ANNOTATIONS,
+    {
+      description: ADVANCED_SEARCH_TOOL_DESCRIPTION,
+      inputSchema: advancedSearchParamsShape,
+      annotations: TOOL_ANNOTATIONS,
+    },
     (args) => executeAdvancedSearch(args)
   );
 
-  server.tool(
+  server.registerTool(
     KANJI_DETAIL_TOOL_NAME,
-    KANJI_DETAIL_TOOL_DESCRIPTION,
-    kanjiDetailParamsShape,
-    TOOL_ANNOTATIONS,
+    {
+      description: KANJI_DETAIL_TOOL_DESCRIPTION,
+      inputSchema: kanjiDetailParamsShape,
+      annotations: TOOL_ANNOTATIONS,
+    },
     (args) => executeKanjiDetails(args)
   );
 
@@ -102,7 +109,7 @@ function registerTools(server: McpServer): void {
  * @param server - MCP server instance
  */
 function registerResources(server: McpServer): void {
-  server.resource(
+  server.registerResource(
     radicalsResourceDefinition.name,
     radicalsResourceDefinition.uri,
     {
