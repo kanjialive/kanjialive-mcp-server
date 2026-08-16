@@ -3,8 +3,8 @@
  *
  * Sets up the MCP server with tools and resources for Kanji Alive API access.
  */
-
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '@modelcontextprotocol/server';
+import { z } from 'zod';
 import { executeBasicSearch } from './tools/basicSearch.js';
 import { executeAdvancedSearch } from './tools/advancedSearch.js';
 import { executeKanjiDetails } from './tools/kanjiDetails.js';
@@ -74,7 +74,7 @@ function registerTools(server: McpServer): void {
     BASIC_SEARCH_TOOL_NAME,
     {
       description: BASIC_SEARCH_TOOL_DESCRIPTION,
-      inputSchema: basicSearchParamsShape,
+      inputSchema: z.object(basicSearchParamsShape),
       annotations: TOOL_ANNOTATIONS,
     },
     (args) => executeBasicSearch(args)
@@ -84,7 +84,7 @@ function registerTools(server: McpServer): void {
     ADVANCED_SEARCH_TOOL_NAME,
     {
       description: ADVANCED_SEARCH_TOOL_DESCRIPTION,
-      inputSchema: advancedSearchParamsShape,
+      inputSchema: z.object(advancedSearchParamsShape),
       annotations: TOOL_ANNOTATIONS,
     },
     (args) => executeAdvancedSearch(args)
@@ -94,7 +94,7 @@ function registerTools(server: McpServer): void {
     KANJI_DETAIL_TOOL_NAME,
     {
       description: KANJI_DETAIL_TOOL_DESCRIPTION,
-      inputSchema: kanjiDetailParamsShape,
+      inputSchema: z.object(kanjiDetailParamsShape),
       annotations: TOOL_ANNOTATIONS,
     },
     (args) => executeKanjiDetails(args)

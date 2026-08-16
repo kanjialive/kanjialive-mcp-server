@@ -45,6 +45,7 @@ npm install
 | `NODE_ENV` | No | — | Set to `production` for sanitized error messages |
 | `LOG_LEVEL` | No | `info` | Logging level (`debug`, `info`, `warning`, `error`) |
 | `ALLOWED_ORIGINS` | No | `*` | Comma-separated CORS origins |
+| `ALLOWED_HOSTS` | No | — | Comma-separated hostnames accepted in the `Host` header (DNS rebinding protection). Unset means no host checking |
 
 ## Development
 
@@ -153,7 +154,8 @@ Complete reference of the 214 traditional Kangxi radicals with 107 position vari
 
 ```
 src/
-├── index.ts                 # Hono HTTP server, session management, CORS
+├── index.ts                 # Env validation, port binding, graceful shutdown
+├── app.ts                   # Hono app: routes, session management, CORS
 ├── api/
 │   ├── client.ts            # Axios client with retry logic
 │   ├── constants.ts         # API configuration

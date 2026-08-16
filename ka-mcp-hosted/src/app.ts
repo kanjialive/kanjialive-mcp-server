@@ -3,22 +3,22 @@
  *
  * Builds the Hono app and the session store. Kept separate from `index.ts` so
  * the app can be exercised via `app.fetch()` without binding a port or starting
- * the process; the Node req/res shims the MCP SDK transport expects live in
- * `http/nodeShims.ts`.
+ * the process.
  */
 
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import {
+  isInitializeRequest,
+  WebStandardStreamableHTTPServerTransport,
+} from '@modelcontextprotocol/server';
+import { hostHeaderValidation } from '@modelcontextprotocol/hono';
 import { randomUUID } from 'node:crypto';
-import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createMCPServer } from './mcp/server.js';
-import { createMockRequest, createMockResponse } from './http/nodeShims.js';
 import { logger } from './utils/logger.js';
 
 // Load version from package.json to avoid duplication
@@ -51,7 +51,7 @@ export function jsonRpcError(code: number, message: string, id: unknown = null):
 function getSessionTransport(
   sessionId: string | undefined,
   c: Context
-): StreamableHTTPServerTransport | Response {
+): WebStandardStreamableHTTPServerTransport | Response {
   if (!isValidSessionId(sessionId)) {
     return c.json(jsonRpcError(-32600, 'Invalid or missing session ID'), 400);
   }
@@ -64,7 +64,7 @@ function getSessionTransport(
 export const app = new Hono();
 
 // Session storage for stateful connections
-export const sessions: Map<string, StreamableHTTPServerTransport> = new Map();
+export const sessions: Map<string, WebStandardStreamableHTTPServerTransport> = new Map();
 export const sessionLastAccess: Map<string, number> = new Map();
 export const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 const SESSION_CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
@@ -110,6 +110,16 @@ app.use(
     exposeHeaders: ['mcp-session-id'],
   })
 );
+
+// DNS rebinding protection. Opt-in: the Host header a client sees depends on the
+// deployment's proxy, so an unset ALLOWED_HOSTS must not lock the server out.
+if (process.env.ALLOWED_HOSTS) {
+  const allowedHosts = process.env.ALLOWED_HOSTS.split(',')
+    .map((host) => host.trim())
+    .filter(Boolean);
+  app.use('/mcp', hostHeaderValidation(allowedHosts));
+  logger.info('Host header validation enabled', { allowedHosts });
+}
 
 export const MAX_BODY_BYTES = 1024 * 1024; // 1 MB
 
@@ -167,7 +177,7 @@ app.get('/', (c) => {
  */
 app.post('/mcp', async (c) => {
   const sessionId = c.req.header('mcp-session-id');
-  let transport: StreamableHTTPServerTransport;
+  let transport: WebStandardStreamableHTTPServerTransport;
   let requestId: unknown = null;
 
   // Validate session ID format if provided (prevents log injection, DoS)
@@ -186,7 +196,7 @@ app.post('/mcp', async (c) => {
       logger.debug('Reusing session', { sessionId });
     } else if (!sessionId && isInitializeRequest(body)) {
       // New session initialization
-      transport = new StreamableHTTPServerTransport({
+      transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (id) => {
           sessions.set(id, transport);
@@ -215,21 +225,9 @@ app.post('/mcp', async (c) => {
       );
     }
 
-    // Create mock request/response using proper Node.js interfaces
-    const headersObj = Object.fromEntries(c.req.raw.headers.entries());
-    const mockReq = createMockRequest(c.req.method, c.req.path, headersObj, body);
-    const { mock: mockRes, getResponse } = createMockResponse();
-
-    await transport.handleRequest(
-      mockReq as unknown as IncomingMessage,
-      mockRes as unknown as ServerResponse,
-      body
-    );
-
-    // Get captured response
-    const { status, headers, body: responseBody } = getResponse();
-
-    return new Response(responseBody || '{}', { status, headers });
+    // The body is already consumed above to route the session, so hand it to the
+    // transport rather than letting it re-read the stream.
+    return await transport.handleRequest(c.req.raw, { parsedBody: body });
   } catch (error) {
     // Without a Content-Length header, bodyLimit cannot reject up front; it caps
     // the stream and surfaces the overflow here, when the body is read. Catching
@@ -259,17 +257,8 @@ app.get('/mcp', async (c) => {
   const sessionId = c.req.header('mcp-session-id')!;
 
   try {
-    const headersObj = Object.fromEntries(c.req.raw.headers.entries());
-    const mockReq = createMockRequest(c.req.method, c.req.path, headersObj);
-    const { mock: mockRes, getResponse } = createMockResponse();
-
-    await transport.handleRequest(
-      mockReq as unknown as IncomingMessage,
-      mockRes as unknown as ServerResponse
-    );
-
-    const { status, headers, body: responseBody } = getResponse();
-    return new Response(responseBody, { status, headers });
+    // Returned as-is: the SSE body is a live ReadableStream, not a buffered string.
+    return await transport.handleRequest(c.req.raw);
   } catch (error) {
     logger.error('MCP GET error', {
       error: error instanceof Error ? error.message : String(error),
