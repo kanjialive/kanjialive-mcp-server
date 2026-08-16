@@ -50,7 +50,7 @@ export function getApiHeaders(): Record<string, string> {
  * @param retryCount - Current retry attempt (1-based)
  * @returns Delay in milliseconds
  */
-function calculateBackoffDelay(retryCount: number): number {
+export function calculateBackoffDelay(retryCount: number): number {
   // Exponential backoff: 0.5, 1, 2, 4, ... seconds
   const base = Math.min(INITIAL_BACKOFF * Math.pow(2, retryCount - 1), MAX_BACKOFF);
   // Add jitter (0-10% of base)
@@ -64,7 +64,7 @@ function calculateBackoffDelay(retryCount: number): number {
  * @param error - Axios error
  * @returns True if request should be retried
  */
-function shouldRetry(error: AxiosError): boolean {
+export function shouldRetry(error: AxiosError): boolean {
   if (isNetworkOrIdempotentRequestError(error)) {
     return true;
   }
@@ -83,7 +83,7 @@ function shouldRetry(error: AxiosError): boolean {
  * @param retryCount - Current retry attempt
  * @returns Delay in milliseconds
  */
-function getRetryDelay(error: AxiosError, retryCount: number): number {
+export function getRetryDelay(error: AxiosError, retryCount: number): number {
   const retryAfter = error.response?.headers?.['retry-after'];
 
   if (retryAfter && /^\d+$/.test(retryAfter)) {
@@ -165,6 +165,16 @@ export function getClient(): AxiosInstance {
     clientInstance = createApiClient();
   }
   return clientInstance;
+}
+
+/**
+ * Drop the cached client so the next getClient() rebuilds it.
+ *
+ * Headers (including the API key) are baked in at creation time, so any change
+ * to RAPIDAPI_KEY requires a rebuild to take effect.
+ */
+export function resetClient(): void {
+  clientInstance = null;
 }
 
 /**
