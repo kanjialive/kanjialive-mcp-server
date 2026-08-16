@@ -32,10 +32,8 @@ const MCP_ACCEPT = 'application/json, text/event-stream';
 /**
  * Drive /mcp through the real router.
  *
- * The Host header is required: the SDK transport rebuilds a WHATWG Request from
- * the Node-style request the app hands it, and needs Host to form an absolute
- * URL. Real HTTP/1.1 clients always send one; a synthetic Request does not.
- * Every verb goes through here so none of them can quietly omit it.
+ * Host is set to mirror what a real HTTP/1.1 client sends, so the suite still
+ * exercises the header path if host validation is ever switched on.
  */
 async function mcp(
   method: string,

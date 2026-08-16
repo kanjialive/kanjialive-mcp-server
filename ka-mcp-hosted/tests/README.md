@@ -21,7 +21,6 @@ npm run typecheck     # src and tests (tsconfig.test.json covers both)
 | `unit/apiClient.test.ts` | Headers, response-shape validation (axios mocked) |
 | `unit/radicals.test.ts` | The 321-entry resource and its missing-file path |
 | `unit/logger.test.ts` | API log helpers |
-| `unit/nodeShims.test.ts` | `src/http/nodeShims.ts`, the Node `req`/`res` adapters |
 | `integration/tools.test.ts` | The three tools end to end, upstream mocked |
 | `integration/http.test.ts` | Routes, sessions, CORS, body limit, real MCP protocol |
 | `helpers.ts` | Shared factories and fixtures (`httpError`, `requestInfo`, …) |
@@ -37,23 +36,22 @@ const res = await app.fetch(new Request('http://localhost/mcp', { … }))
 ```
 
 That runs real routing, middleware, session handling and the real MCP SDK
-transport in-process — no port, no subprocess. Only `src/api/client.ts` is
+transport (`WebStandardStreamableHTTPServerTransport`, which takes the `Request`
+directly) in-process — no port, no subprocess. Only `src/api/client.ts` is
 mocked, so no test touches the network or needs a RapidAPI key.
 
 Two things to know when adding HTTP tests:
 
-- **Send a `Host` header.** The SDK transport rebuilds a WHATWG `Request` and
-  needs `Host` for an absolute URL. Go through `post()`, `get()` or `del()`,
-  which all route through one builder that sets it.
 - **Responses may be SSE.** Use the `parseRpc()` helper, which handles both a
   bare JSON body and an `event:`/`data:` frame.
+- **A `GET /mcp` body is a live stream.** The transport hands back a real
+  `ReadableStream`; cancel it, or the test hangs waiting on an open response.
 
 ## Not covered
 
 - **The live upstream.** Every test stubs `src/api/client.ts`, so nothing here
   asserts that the real Kanji Alive API still returns the shapes the formatters
   expect. A breaking upstream change would pass CI.
-- **Concurrent server-initiated messages.** `app.ts` creates one `McpServer` at
-  startup and connects each session's transport to it. Request/response traffic
-  across concurrent sessions is covered; notifications and sampling across
-  simultaneous sessions are not.
+- **Server-initiated messages.** Each session gets its own `McpServer`, and
+  request/response traffic across concurrent sessions is covered; notifications
+  and sampling are not exercised.
