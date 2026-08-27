@@ -17,18 +17,15 @@ https://kanjialive-mcp-server-production.up.railway.app/mcp
 That's it. You can now ask your AI assistant to draw on its knowledge of [Kanji alive](https://kanjialive.com) to answer questions like:
 
 - "Look up the kanji 親"
-- "Find kanji that mean 'parent'"
 - "Search for kanji with the onyomi reading シン"
-- "Show me kanji with the kunyomi reading おや"
 - "Get detailed information about the kanji 見, including stroke order and examples"
 - "Find all kanji with 5 strokes that are taught in grade 1"
 - "Show me kanji that use the 'fire' radical"
-- "Find kanji where the radical has 7 strokes"
 - "Show me kanji with the radical in the hen (left) position"
 - "What kanji are in the AP Exam study list, chapter 3?"
 - "Tell me about the 214 traditional kanji radicals"
 
-You can use either romaji or Japanese script — "shin" and "シン" both work, as do "oya" and "おや".
+You can use either romaji or Japanese script in your queries — "shin" and "シン" both work, as do "oya" and "おや".
 
 ---
 
