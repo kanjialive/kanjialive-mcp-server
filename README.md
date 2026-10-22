@@ -4,17 +4,12 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that lets you search and explore 1,235 Japanese kanji through any MCP-compatible AI assistant — Claude, ChatGPT, or others.
 
-## Quick Start (Hosted Server)
+> [!IMPORTANT]
+> **The hosted server is offline.** The public endpoint at `kanjialive-mcp-server-production.up.railway.app` has been taken down and this repository is no longer actively maintained. To use the server, run it locally (see [Local Server](#local-server-python-stdio) below). Dependencies were last updated for security fixes in October 2026.
 
-The fastest way to use this is through the hosted server. No installation, no configuration.
+## Example Questions
 
-**In your MCP client** (Claude Desktop, claude.ai, ChatGPT, MSTY, etc.), add a new remote MCP server with this URL:
-
-```
-https://kanjialive-mcp-server-production.up.railway.app/mcp
-```
-
-That's it. You can now ask your AI assistant to draw on its knowledge of [Kanji alive](https://kanjialive.com) to answer questions like:
+Once the server is connected, you can ask your AI assistant to draw on its knowledge of [Kanji alive](https://kanjialive.com) to answer questions like:
 
 - "Look up the kanji 親"
 - "Search for kanji with the onyomi reading シン"
@@ -31,7 +26,7 @@ You can use either romaji or Japanese script in your queries — "shin" and "シ
 
 ## Local Server (Python, stdio)
 
-If you prefer to run the server locally — for offline use, development, or to avoid the hosted server — there is a Python implementation that communicates over stdio.
+The server runs locally as a Python implementation that communicates over stdio.
 
 ### Prerequisites
 
